@@ -12,6 +12,7 @@ import { SpotifyImporterPage } from './pages/SpotifyImporterPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PluginsPage } from './pages/PluginsPage';
+import { YouTubePage } from './pages/YouTubePage';
 import { SleepTimerModal } from './components/Player/SleepTimerModal';
 import { useThemeStore } from './stores/useThemeStore';
 import { useDownloadStore } from './stores/useDownloadStore';
@@ -54,6 +55,7 @@ export const App: React.FC = () => {
           {activeTab === 'home' && <HomePage />}
           {activeTab === 'explore' && <ExplorePage />}
           {activeTab === 'search' && <SearchPage initialQuery={searchQuery} />}
+          {activeTab === 'youtube' && <YouTubePage />}
           {activeTab === 'downloader' && <DownloaderPage />}
           {activeTab === 'spotify' && <SpotifyImporterPage />}
           {activeTab === 'library' && <LibraryPage />}
