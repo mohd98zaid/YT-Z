@@ -11,6 +11,9 @@ import {
   Puzzle,
   Sliders,
   Moon,
+  ChevronDown,
+  ChevronUp,
+  Search,
 } from 'lucide-react';
 import { THEME_PRESETS } from '../themes/presets';
 import { useThemeStore } from '../stores/useThemeStore';
@@ -37,6 +40,9 @@ export const SettingsPage: React.FC = () => {
   const [embedMetadata, setEmbedMetadata] = useState(true);
   const [embedSubtitles, setEmbedSubtitles] = useState(false);
   const [savedToast, setSavedToast] = useState(false);
+  const [isThemesCollapsed, setIsThemesCollapsed] = useState(true);
+  const [themeFilter, setThemeFilter] = useState('all');
+  const [themeSearch, setThemeSearch] = useState('');
 
   useEffect(() => {
     api.getConfig().then((cfg) => {
@@ -83,68 +89,173 @@ export const SettingsPage: React.FC = () => {
         )}
       </div>
 
-      {/* 30+ Themes Grid Section */}
+      {/* 30+ Themes Grid Section (Collapsible) */}
       <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Palette className="w-6 h-6 text-primary" />
-          <h2 className="text-xl font-bold text-foreground">Theme Presets (from ytm-rs & BitChord)</h2>
-        </div>
+        {(() => {
+          const currentTheme = THEME_PRESETS.find((t) => t.id === currentThemeId) || THEME_PRESETS[0];
+          const filteredThemes = THEME_PRESETS.filter((t) => {
+            const matchesFilter = themeFilter === 'all' || t.category.toLowerCase() === themeFilter.toLowerCase();
+            const matchesSearch =
+              !themeSearch.trim() ||
+              t.name.toLowerCase().includes(themeSearch.toLowerCase()) ||
+              t.description.toLowerCase().includes(themeSearch.toLowerCase()) ||
+              t.category.toLowerCase().includes(themeSearch.toLowerCase());
+            return matchesFilter && matchesSearch;
+          });
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {THEME_PRESETS.map((theme) => {
-            const isSelected = currentThemeId === theme.id;
-            return (
+          return (
+            <>
+              {/* Collapsible Header Card */}
               <div
-                key={theme.id}
-                onClick={() => setTheme(theme.id)}
-                className={`p-4 rounded-2xl border cursor-pointer transition-all duration-200 relative group flex flex-col justify-between ${
-                  isSelected
-                    ? 'border-primary ring-2 ring-primary/30 shadow-lg shadow-primary/20 bg-surface-elevated'
-                    : 'border-border bg-surface hover:border-primary/40 hover:-translate-y-0.5'
-                }`}
+                onClick={() => setIsThemesCollapsed(!isThemesCollapsed)}
+                className="flex items-center justify-between p-4 sm:p-5 rounded-3xl bg-surface border border-border hover:border-primary/40 cursor-pointer shadow-xl transition-all group select-none"
               >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-sm text-foreground">{theme.name}</span>
-                    {isSelected && (
-                      <span className="w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center">
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-11 h-11 rounded-2xl bg-surface-elevated flex items-center justify-center border border-border text-primary group-hover:scale-105 transition-transform shrink-0 shadow-inner">
+                    <Palette className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h2 className="text-base sm:text-lg font-bold text-foreground">
+                        Theme Presets (from ytm-rs &amp; BitChord)
+                      </h2>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-primary/15 text-primary border border-primary/25">
+                        30+ Themes
                       </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-foreground-muted truncate">
+                      <span>Active: <strong className="text-foreground">{currentTheme.name}</strong></span>
+                      <span className="w-1 h-1 rounded-full bg-border" />
+                      <div className="flex items-center gap-1">
+                        <div
+                          className="w-2.5 h-2.5 rounded-full border border-white/20"
+                          style={{ backgroundColor: currentTheme.colors.primary }}
+                        />
+                        <div
+                          className="w-2.5 h-2.5 rounded-full border border-white/20"
+                          style={{ backgroundColor: currentTheme.colors.bgSurface }}
+                        />
+                      </div>
+                      <span className="text-foreground-subtle hidden sm:inline">({currentTheme.category})</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0 ml-3">
+                  <span className="text-xs font-bold text-primary group-hover:underline hidden sm:inline">
+                    {isThemesCollapsed ? 'Show Themes' : 'Collapse'}
+                  </span>
+                  <div className="w-8 h-8 rounded-full bg-surface-elevated border border-border flex items-center justify-center text-foreground-muted group-hover:text-foreground transition-all">
+                    {isThemesCollapsed ? (
+                      <ChevronDown className="w-4 h-4" />
+                    ) : (
+                      <ChevronUp className="w-4 h-4" />
                     )}
                   </div>
-                  <p className="text-xs text-foreground-muted line-clamp-2">{theme.description}</p>
-                </div>
-
-                {/* Color Swatches */}
-                <div className="flex items-center gap-1.5 mt-4 pt-3 border-t border-border/40">
-                  <div
-                    className="w-5 h-5 rounded-full border border-white/20 shadow-sm"
-                    style={{ backgroundColor: theme.colors.bgMain }}
-                    title="Background"
-                  />
-                  <div
-                    className="w-5 h-5 rounded-full border border-white/20 shadow-sm"
-                    style={{ backgroundColor: theme.colors.bgSurface }}
-                    title="Surface"
-                  />
-                  <div
-                    className="w-5 h-5 rounded-full border border-white/20 shadow-sm"
-                    style={{ backgroundColor: theme.colors.primary }}
-                    title="Primary"
-                  />
-                  <div
-                    className="w-5 h-5 rounded-full border border-white/20 shadow-sm"
-                    style={{ backgroundColor: theme.colors.accent }}
-                    title="Accent"
-                  />
-                  <span className="text-[10px] text-foreground-subtle ml-auto font-mono">
-                    {theme.category}
-                  </span>
                 </div>
               </div>
-            );
-          })}
-        </div>
+
+              {/* Expanded Theme Browser */}
+              {!isThemesCollapsed && (
+                <div className="space-y-4 pt-2">
+                  {/* Category Filter Pills & Search */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-2xl bg-surface border border-border/80">
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { id: 'all', label: 'All (30+)' },
+                        { id: 'apple', label: 'Apple' },
+                        { id: 'dark', label: 'Dark / OLED' },
+                        { id: 'light', label: 'Light' },
+                        { id: 'vibrant', label: 'Vibrant' },
+                        { id: 'retro', label: 'Retro' },
+                      ].map((cat) => (
+                        <button
+                          key={cat.id}
+                          onClick={() => setThemeFilter(cat.id)}
+                          className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                            themeFilter === cat.id
+                              ? 'bg-primary text-white shadow-sm shadow-primary/20'
+                              : 'bg-surface-elevated text-foreground-muted hover:text-foreground border border-border/60'
+                          }`}
+                        >
+                          {cat.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="relative w-full sm:w-56">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-foreground-muted" />
+                      <input
+                        type="text"
+                        value={themeSearch}
+                        onChange={(e) => setThemeSearch(e.target.value)}
+                        placeholder="Search themes..."
+                        className="w-full bg-surface-elevated border border-border focus:border-primary text-foreground placeholder:text-foreground-subtle text-xs rounded-xl pl-8 pr-3 py-1.5 outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Themes Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {filteredThemes.map((theme) => {
+                      const isSelected = currentThemeId === theme.id;
+                      return (
+                        <div
+                          key={theme.id}
+                          onClick={() => setTheme(theme.id)}
+                          className={`p-4 rounded-2xl border cursor-pointer transition-all duration-200 relative group flex flex-col justify-between ${
+                            isSelected
+                              ? 'border-primary ring-2 ring-primary/30 shadow-lg shadow-primary/20 bg-surface-elevated'
+                              : 'border-border bg-surface hover:border-primary/40 hover:-translate-y-0.5'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-bold text-sm text-foreground">{theme.name}</span>
+                              {isSelected && (
+                                <span className="w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center">
+                                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-foreground-muted line-clamp-2">{theme.description}</p>
+                          </div>
+
+                          {/* Color Swatches */}
+                          <div className="flex items-center gap-1.5 mt-4 pt-3 border-t border-border/40">
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-sm"
+                              style={{ backgroundColor: theme.colors.bgMain }}
+                              title="Background"
+                            />
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-sm"
+                              style={{ backgroundColor: theme.colors.bgSurface }}
+                              title="Surface"
+                            />
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-sm"
+                              style={{ backgroundColor: theme.colors.primary }}
+                              title="Primary"
+                            />
+                            <div
+                              className="w-5 h-5 rounded-full border border-white/20 shadow-sm"
+                              style={{ backgroundColor: theme.colors.accent }}
+                              title="Accent"
+                            />
+                            <span className="text-[10px] text-foreground-subtle ml-auto font-mono">
+                              {theme.category}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </section>
 
       {/* Audio Engine Configuration */}
