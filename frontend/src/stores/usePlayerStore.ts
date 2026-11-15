@@ -18,9 +18,15 @@ export const EQ_PRESETS: Record<string, number[]> = {
 
 interface AudioStats {
   codec: string;
+  format?: string;
   bitrate: number;
   duration: number;
   provider: string;
+  isLossless?: boolean;
+  sampleRate?: number;
+  bitDepth?: number;
+  qualityTier?: string;
+  addonName?: string;
 }
 
 interface PlayerState {
@@ -42,6 +48,10 @@ interface PlayerState {
   lastSkippedNotice: string | null;
   lyrics: LyricsResponse | null;
   isLyricsLoading: boolean;
+
+  // Hi-Res Lossless Audio (BitChord Addon System)
+  audioQuality: 'lossless' | 'high' | 'auto';
+  setAudioQuality: (quality: 'lossless' | 'high' | 'auto') => void;
 
   // Equalizer
   eqEnabled: boolean;
@@ -224,6 +234,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   lyrics: null,
   isLyricsLoading: false,
 
+  // Hi-Res Lossless Audio (BitChord Addon System)
+  audioQuality: 'lossless',
+  setAudioQuality: (quality: 'lossless' | 'high' | 'auto') => {
+    set({ audioQuality: quality });
+    const { currentTrack, playTrack } = get();
+    if (currentTrack) {
+      playTrack(currentTrack);
+    }
+  },
+
   eqEnabled: true,
   eqPreset: 'Flat',
   eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -299,20 +319,43 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         });
       } else {
         const videoId = track.videoId || track.id;
-        // Use local range-aware audio streaming proxy to completely eliminate CORS restrictions
-        streamUrl = `http://127.0.0.1:47892/api/stream/${encodeURIComponent(videoId)}/audio`;
+        const quality = get().audioQuality || 'lossless';
+        const titleParam = encodeURIComponent(track.title || '');
+        const artistParam = encodeURIComponent(track.artist || '');
+        const durParam = track.durationSeconds || 0;
 
-        // Fetch stream metadata in background
-        api.getAudioStream(videoId).then((streamInfo) => {
+        // Use local range-aware audio streaming proxy with BitChord Addon lossless resolution
+        streamUrl = `http://127.0.0.1:47892/api/stream/${encodeURIComponent(videoId)}/audio?title=${titleParam}&artist=${artistParam}&duration=${durParam}&quality=${quality}`;
+
+        // Fetch stream metadata with BitChord Lossless Addon details in background
+        api.getAudioStream(videoId, track.title, track.artist, durParam, quality).then((streamInfo) => {
           set({
             audioStats: {
               codec: streamInfo.codec,
               bitrate: streamInfo.bitrate,
-              duration: track.durationSeconds || streamInfo.duration || 0,
-              provider: 'InnerTube Audio Proxy',
+              duration: track.durationSeconds || 0,
+              provider: streamInfo.addonName || (streamInfo.isLossless ? 'BitChord Hi-Res Module' : 'YouTube Music 256k'),
+              isLossless: streamInfo.isLossless,
+              sampleRate: streamInfo.sampleRate,
+              bitDepth: streamInfo.bitDepth,
+              qualityTier: streamInfo.qualityTier,
+              addonName: streamInfo.addonName,
             },
           });
-        }).catch(() => {});
+        }).catch(() => {
+          set({
+            audioStats: {
+              codec: 'opus',
+              bitrate: 160,
+              duration: track.durationSeconds || 0,
+              provider: 'YouTube Music Engine',
+              isLossless: false,
+              sampleRate: 48000,
+              bitDepth: 16,
+              qualityTier: 'standard',
+            },
+          });
+        });
 
         // Fetch SponsorBlock skip segments in background
         api.getSkipSegments(videoId).then((segs) => {

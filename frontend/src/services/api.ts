@@ -32,8 +32,22 @@ export const api = {
   getPlaylist: (playlistId: string) => fetchJson<any>(`${API_BASE}/api/ytm/playlist/${playlistId}`),
   getRadio: (videoId: string) => fetchJson<Track[]>(`${API_BASE}/api/ytm/radio/${videoId}`),
 
-  // Playback & Stream
-  getAudioStream: (videoId: string) => fetchJson<{ streamUrl: string; codec: string; bitrate: number; duration: number }>(`${API_BASE}/api/stream/${videoId}`),
+  // Playback & Stream (BitChord Lossless Addon & YouTube Fallback)
+  getAudioStream: (videoId: string, title = '', artist = '', duration = 0, quality = 'auto') =>
+    fetchJson<{
+      streamUrl: string;
+      codec: string;
+      format: string;
+      bitrate: number;
+      sampleRate: number;
+      bitDepth: number;
+      isLossless: boolean;
+      qualityTier: string;
+      source: string;
+      addonName?: string;
+    }>(
+      `${API_BASE}/api/stream/${videoId}?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&duration=${duration}&quality=${quality}`
+    ),
   getSkipSegments: (videoId: string) => fetchJson<SponsorBlockSegment[]>(`${API_BASE}/api/stream/${videoId}/segments`),
 
   // Lyrics

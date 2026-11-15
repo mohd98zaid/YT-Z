@@ -24,6 +24,7 @@ import {
   ExternalLink,
   RefreshCw,
   Tv,
+  Sparkles,
 } from 'lucide-react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { useDownloadStore } from '../../stores/useDownloadStore';
@@ -48,6 +49,8 @@ export const ExpandedPlayer: React.FC = () => {
     isExpanded,
     showStatsForNerds,
     audioStats,
+    audioQuality,
+    setAudioQuality,
     setExpanded,
     togglePlay,
     next,
@@ -370,7 +373,7 @@ export const ExpandedPlayer: React.FC = () => {
           )}
 
           {/* Track Details */}
-          <div className="mt-8 text-center w-full px-4">
+          <div className="mt-4 text-center w-full px-4">
             <h2 className="text-2xl md:text-3xl font-black text-foreground tracking-tight truncate">
               {currentTrack.title}
             </h2>
@@ -380,12 +383,117 @@ export const ExpandedPlayer: React.FC = () => {
             {currentTrack.album && (
               <p className="text-xs text-foreground-subtle mt-0.5">{currentTrack.album}</p>
             )}
+
+            {/* Apple Music / BitChord Hi-Res Lossless Audio Badge */}
+            <div className="mt-3 flex items-center justify-center gap-2">
+              {audioStats?.isLossless ? (
+                <button
+                  onClick={toggleStatsForNerds}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black tracking-wider bg-gradient-to-r from-amber-500/20 via-yellow-500/25 to-amber-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.3)] hover:scale-105 transition-all"
+                  title="Bit-Perfect Lossless FLAC via BitChord Addon Engine"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{audioStats?.qualityTier === 'hi-res' ? 'HI-RES LOSSLESS' : 'LOSSLESS'}</span>
+                  <span className="text-[10px] opacity-80 font-mono font-normal">
+                    {audioStats.format || 'FLAC'} · {audioStats.bitDepth || 16}-bit/{Math.round((audioStats.sampleRate || 44100) / 1000)}kHz
+                  </span>
+                </button>
+              ) : (
+                <button
+                  onClick={toggleStatsForNerds}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-surface-elevated/80 text-foreground-muted border border-border/60 hover:text-foreground hover:scale-105 transition-all"
+                  title="Standard YouTube Music Opus stream (Click for Stats & Lossless Switch)"
+                >
+                  <span className="uppercase font-bold">{audioStats?.codec || 'OPUS'}</span>
+                  <span className="text-[10px] opacity-75">· {audioStats?.bitrate || 256} kbps</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Right: Synced Lyrics View or Up Next Queue */}
         <div className="w-full md:w-1/2 h-full flex flex-col bg-surface/40 border border-border/40 rounded-3xl backdrop-blur-xl overflow-hidden relative shadow-2xl">
-          {activeTab === 'lyrics' ? (
+          {showStatsForNerds && audioStats ? (
+            <div className="h-full bg-surface border border-white/10 p-6 z-30 flex flex-col justify-between text-xs font-mono text-foreground overflow-y-auto rounded-3xl">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-primary flex items-center gap-2">
+                    <Gauge className="w-4 h-4" />
+                    <span>Stats for Nerds (Audio Engine & BitChord Add-ons)</span>
+                  </h4>
+                  {audioStats.isLossless && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      BIT-PERFECT
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-2.5">
+                  <div className="flex justify-between py-1 border-b border-border/50">
+                    <span className="text-foreground-muted">Track:</span>
+                    <span className="truncate max-w-[240px] text-right font-medium">{currentTrack.title}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-border/50">
+                    <span className="text-foreground-muted">Audio Codec:</span>
+                    <span className="uppercase text-emerald-400 font-bold">{audioStats.codec}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-border/50">
+                    <span className="text-foreground-muted">Bitrate:</span>
+                    <span className="text-primary font-bold">{audioStats.bitrate} kbps</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-border/50">
+                    <span className="text-foreground-muted">Resolution:</span>
+                    <span className="text-amber-400 font-semibold">
+                      {audioStats.bitDepth || 16}-bit / {audioStats.sampleRate || 44100} Hz
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-border/50">
+                    <span className="text-foreground-muted">Active Source Provider:</span>
+                    <span className="text-foreground font-semibold">{audioStats.provider}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-border/50">
+                    <span className="text-foreground-muted">Output Channel:</span>
+                    <span>Direct WebAudio 10-Band EQ Engine</span>
+                  </div>
+                </div>
+
+                {/* Stream Quality Selector (BitChord Mode) */}
+                <div className="pt-2">
+                  <div className="text-[11px] font-bold text-foreground-muted uppercase tracking-wider mb-2">
+                    Audio Quality Target
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'lossless', label: 'Lossless FLAC', desc: 'Bit-perfect 1411k+' },
+                      { id: 'high', label: 'High (320k)', desc: 'Enhanced bitrate' },
+                      { id: 'auto', label: 'Standard', desc: 'YouTube Opus 256k' },
+                    ].map((mode) => (
+                      <button
+                        key={mode.id}
+                        onClick={() => setAudioQuality(mode.id as any)}
+                        className={`p-2 rounded-xl border text-left transition-all ${
+                          audioQuality === mode.id
+                            ? 'bg-primary/20 border-primary text-primary shadow-sm shadow-primary/20'
+                            : 'bg-surface-elevated/60 border-border/60 text-foreground-muted hover:text-foreground hover:bg-surface-elevated'
+                        }`}
+                      >
+                        <div className="font-bold text-[11px] leading-tight">{mode.label}</div>
+                        <div className="text-[9px] opacity-70 mt-0.5">{mode.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={toggleStatsForNerds}
+                className="w-full mt-4 py-2.5 rounded-xl bg-surface-elevated hover:bg-surface-elevated/80 text-foreground font-semibold transition-colors"
+              >
+                Close Stats
+              </button>
+            </div>
+          ) : activeTab === 'lyrics' ? (
             <LyricsView />
           ) : (
             <div className="h-full flex flex-col p-4 overflow-hidden">
@@ -423,51 +531,6 @@ export const ExpandedPlayer: React.FC = () => {
                   );
                 })}
               </div>
-            </div>
-          )}
-
-          {/* Stats for nerds overlay */}
-          {showStatsForNerds && audioStats && (
-            <div className="absolute inset-0 bg-surface/95 backdrop-blur-2xl p-6 z-30 flex flex-col justify-between text-xs font-mono text-foreground">
-              <div>
-                <h4 className="text-sm font-bold text-primary mb-4 flex items-center gap-2">
-                  <Gauge className="w-4 h-4" />
-                  <span>Stats for Nerds (Audio DSP)</span>
-                </h4>
-                <div className="space-y-3">
-                  <div className="flex justify-between py-1 border-b border-border/50">
-                    <span className="text-foreground-muted">Track ID:</span>
-                    <span>{currentTrack.id}</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-border/50">
-                    <span className="text-foreground-muted">Audio Codec:</span>
-                    <span className="uppercase text-emerald-400 font-bold">{audioStats.codec}</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-border/50">
-                    <span className="text-foreground-muted">Bitrate:</span>
-                    <span className="text-primary font-bold">{audioStats.bitrate} kbps</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-border/50">
-                    <span className="text-foreground-muted">Stream Provider:</span>
-                    <span>{audioStats.provider}</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-border/50">
-                    <span className="text-foreground-muted">Playback Speed:</span>
-                    <span>{playbackSpeed}x</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-border/50">
-                    <span className="text-foreground-muted">Volume:</span>
-                    <span>{Math.round(volume * 100)}%</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={toggleStatsForNerds}
-                className="w-full py-2 rounded-xl bg-surface-elevated hover:bg-surface-elevated/80 text-foreground font-semibold"
-              >
-                Close Stats
-              </button>
             </div>
           )}
         </div>

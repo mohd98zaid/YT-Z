@@ -15,11 +15,14 @@ import {
   Zap,
   Volume2,
   Search,
+  Sparkles,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { PluginSource } from '../types';
+import { usePlayerStore } from '../stores/usePlayerStore';
 
 export const PluginsPage: React.FC = () => {
+  const { audioQuality, setAudioQuality } = usePlayerStore();
   const [plugins, setPlugins] = useState<PluginSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<string>('all');
@@ -175,6 +178,47 @@ export const PluginsPage: React.FC = () => {
             <Plus className="w-4 h-4 stroke-[3]" />
             <span>Add Module Source</span>
           </button>
+        </div>
+      </div>
+
+      {/* BitChord Addon & Hi-Res Audio Architecture Banner */}
+      <div className="p-5 rounded-3xl bg-gradient-to-r from-amber-500/10 via-surface to-primary/10 border border-amber-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/10">
+            <Sparkles className="w-6 h-6 text-amber-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-extrabold text-sm text-foreground">BitChord Hi-Res Lossless Architecture</h3>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                ACTIVE
+              </span>
+            </div>
+            <p className="text-xs text-foreground-muted mt-0.5 max-w-xl">
+              Audio source add-ons resolve 16-bit / 24-bit bit-perfect FLAC audio via BitChord's JSON protocol (<code className="text-amber-400 font-mono text-[11px]">/search</code> &amp; <code className="text-amber-400 font-mono text-[11px]">/stream</code>). When offline or not found, playback automatically falls back to 256k YouTube Music Opus.
+            </p>
+          </div>
+        </div>
+
+        {/* Quality Preference Pill Switcher */}
+        <div className="flex items-center gap-1.5 p-1 bg-surface-elevated/80 border border-border rounded-2xl shrink-0">
+          {[
+            { id: 'lossless', label: 'Lossless FLAC' },
+            { id: 'high', label: 'High (320k)' },
+            { id: 'auto', label: 'Standard (Opus)' },
+          ].map((mode) => (
+            <button
+              key={mode.id}
+              onClick={() => setAudioQuality(mode.id as any)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                audioQuality === mode.id
+                  ? 'bg-amber-500 text-black shadow-md shadow-amber-500/30 font-black'
+                  : 'text-foreground-muted hover:text-foreground'
+              }`}
+            >
+              {mode.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -338,6 +382,39 @@ export const PluginsPage: React.FC = () => {
               </button>
             </div>
 
+            {/* Quick Fill Presets */}
+            <div className="mb-4 p-3 bg-surface-elevated/70 border border-border/80 rounded-2xl">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-foreground-subtle block mb-1.5">
+                BitChord Quick Presets
+              </span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewName('BitChord Unified Addon');
+                    setNewType('audio_source');
+                    setNewEndpoint('http://localhost:8080');
+                    setNewDescription('Local self-hosted BitChord unified lossless audio addon.');
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-surface border border-border/80 hover:border-primary text-[11px] font-semibold text-foreground transition-all"
+                >
+                  Unified Addon (Local 8080)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewName('Hi-Res FLAC Lossless Module');
+                    setNewType('audio_source');
+                    setNewEndpoint('internal://bitchord/lossless-engine');
+                    setNewDescription('Bit-perfect 16-bit/44.1kHz and 24-bit/96kHz lossless FLAC decoding.');
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-surface border border-border/80 hover:border-primary text-[11px] font-semibold text-foreground transition-all"
+                >
+                  Internal BitChord Lossless Engine
+                </button>
+              </div>
+            </div>
+
             <form onSubmit={handleAddSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-foreground mb-1.5">Module Name</label>
@@ -369,11 +446,11 @@ export const PluginsPage: React.FC = () => {
               <div>
                 <label className="block text-xs font-bold text-foreground mb-1.5">Endpoint URL</label>
                 <input
-                  type="url"
+                  type="text"
                   required
                   value={newEndpoint}
                   onChange={(e) => setNewEndpoint(e.target.value)}
-                  placeholder="https://api.my-music-source.org/v1"
+                  placeholder="https://api.my-music-source.org or internal://..."
                   className="w-full bg-surface-elevated border border-border rounded-xl px-3.5 py-2.5 text-xs text-foreground outline-none focus:border-primary font-mono"
                 />
               </div>

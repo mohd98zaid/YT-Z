@@ -34,6 +34,7 @@ from backend.api.spotify_importer import SpotifyImporter
 from backend.api.local_library import LocalLibrary
 from backend.api.plugins import PluginService
 from backend.api.youtube_search import YouTubeSearchService
+from backend.api.addon_source import AddonSourceResolver
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,7 +66,8 @@ app.add_middleware(
 config_mgr = ConfigManager()
 db_mgr = DatabaseManager()
 ytmusic_svc = YTMusicService()
-stream_resolver = StreamResolver()
+addon_resolver = AddonSourceResolver(db_mgr)
+stream_resolver = StreamResolver(addon_resolver)
 lyrics_engine = LyricsEngine(db_mgr)
 local_lib = LocalLibrary(config_mgr)
 plugin_svc = PluginService(db_mgr)
@@ -181,24 +183,47 @@ async def get_radio(video_id: str):
 # ==================== Stream & Audio Endpoints ====================
 
 @app.get("/api/stream/{video_id}")
-async def get_audio_stream(video_id: str):
-    stream_info = stream_resolver.resolve_audio(video_id)
+async def get_audio_stream(
+    video_id: str,
+    title: Optional[str] = Query(""),
+    artist: Optional[str] = Query(""),
+    duration: Optional[int] = Query(0),
+    quality: Optional[str] = Query("auto")
+):
+    stream_info = stream_resolver.resolve_audio(
+        video_id,
+        title=title,
+        artist=artist,
+        duration=duration,
+        quality=quality
+    )
     if not stream_info:
         raise HTTPException(status_code=500, detail="Could not resolve audio stream for track.")
     return stream_info
 
 @app.get("/api/stream/{video_id}/audio")
-def stream_audio_proxy(video_id: str, request: Request):
+def stream_audio_proxy(
+    video_id: str,
+    request: Request,
+    title: Optional[str] = Query(""),
+    artist: Optional[str] = Query(""),
+    quality: Optional[str] = Query("auto")
+):
     """
     Audio streaming proxy with HTTP 206 Partial Content Range support.
-    Eliminates browser CORS blocks and enables native Web Audio API equalizer processing.
+    Supports Lossless FLAC/ALAC add-on streams (BitChord architecture) and YouTube Opus.
     """
-    stream_info = stream_resolver.resolve_audio(video_id)
+    stream_info = stream_resolver.resolve_audio(
+        video_id,
+        title=title,
+        artist=artist,
+        quality=quality
+    )
     if not stream_info:
         raise HTTPException(status_code=404, detail="Could not resolve audio stream for track.")
     
-    googlevideo_url = stream_info.get("streamUrl")
-    if not googlevideo_url:
+    stream_url = stream_info.get("streamUrl")
+    if not stream_url:
         raise HTTPException(status_code=404, detail="No stream URL available.")
 
     range_header = request.headers.get("Range")
@@ -209,12 +234,28 @@ def stream_audio_proxy(video_id: str, request: Request):
         remote_headers["Range"] = range_header
 
     try:
-        resp = requests.get(googlevideo_url, headers=remote_headers, stream=True, timeout=12)
+        resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=15)
+        
+        # Determine content type based on codec
+        codec = str(stream_info.get("codec", "")).lower()
+        if "flac" in codec:
+            content_type = "audio/flac"
+        elif "alac" in codec or "m4a" in codec or "mp4" in codec:
+            content_type = "audio/mp4"
+        elif "mp3" in codec:
+            content_type = "audio/mpeg"
+        else:
+            content_type = resp.headers.get("Content-Type", "audio/webm")
+
         headers = {
             "Accept-Ranges": "bytes",
-            "Content-Type": resp.headers.get("Content-Type", "audio/webm"),
+            "Content-Type": content_type,
             "Access-Control-Allow-Origin": "*",
             "Cache-Control": "public, max-age=3600",
+            "X-Audio-Codec": str(stream_info.get("codec", "opus")),
+            "X-Audio-Bitrate": str(stream_info.get("bitrate", 256)),
+            "X-Audio-Lossless": "true" if stream_info.get("isLossless") else "false",
+            "X-Audio-Source": str(stream_info.get("source", "youtube")),
         }
         if "Content-Range" in resp.headers:
             headers["Content-Range"] = resp.headers["Content-Range"]
@@ -230,7 +271,7 @@ def stream_audio_proxy(video_id: str, request: Request):
             chunk_generator(),
             status_code=resp.status_code,
             headers=headers,
-            media_type=headers["Content-Type"]
+            media_type=content_type
         )
     except Exception as e:
         logger.error(f"Error proxying audio for {video_id}: {e}")

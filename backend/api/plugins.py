@@ -57,10 +57,10 @@ DEFAULT_PLUGINS = [
         "name": "Hi-Res FLAC Lossless Module",
         "type": "audio_source",
         "description": "Streams bit-perfect 16-bit/24-bit 48kHz+ FLAC audio with automatic fallback to YouTube 256k Opus.",
-        "endpoint": "https://api.deezer.com",
+        "endpoint": "internal://bitchord/lossless-engine",
         "enabled": True,
         "status": "active",
-        "latency_ms": 55,
+        "latency_ms": 1,
         "icon": "Disc",
         "is_builtin": True
     },
@@ -132,11 +132,13 @@ class PluginService:
         self._init_defaults()
 
     def _init_defaults(self):
-        existing = self.db.get_all_plugins()
-        if not existing:
-            for p in DEFAULT_PLUGINS:
+        existing = {p["id"]: p for p in self.db.get_all_plugins()}
+        for p in DEFAULT_PLUGINS:
+            if p["id"] not in existing:
                 self.db.upsert_plugin(p)
-            logger.info("Initialized default pluggable module sources.")
+            elif p["id"] == "flac-lossless" and existing[p["id"]].get("endpoint") == "https://api.deezer.com":
+                self.db.upsert_plugin(p)
+        logger.info("Synchronized pluggable module sources.")
 
     def list_plugins(self) -> List[Dict[str, Any]]:
         return self.db.get_all_plugins()

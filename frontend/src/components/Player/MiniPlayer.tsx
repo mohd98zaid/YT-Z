@@ -40,6 +40,7 @@ export const MiniPlayer: React.FC = () => {
     isEqualizerOpen,
     isQueueOpen,
     lastSkippedNotice,
+    audioStats,
     sleepTimerRemaining,
     sleepTimerStopAfterTrack,
     togglePlay,
@@ -161,7 +162,34 @@ export const MiniPlayer: React.FC = () => {
           >
             {currentTrack.title}
           </h4>
-          <p className="text-xs text-foreground-muted truncate">{currentTrack.artist}</p>
+          <div className="flex items-center gap-1.5 truncate">
+            <p className="text-xs text-foreground-muted truncate">{currentTrack.artist}</p>
+            {audioStats?.isLossless ? (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpanded(true);
+                  toggleStatsForNerds();
+                }}
+                className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-black tracking-wider bg-gradient-to-r from-amber-500/20 to-yellow-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.25)] cursor-pointer hover:scale-105 transition-transform"
+                title={`Bit-Perfect Lossless FLAC (${audioStats.bitDepth || 16}-bit/${Math.round((audioStats.sampleRate || 44100)/1000)}kHz)`}
+              >
+                LOSSLESS
+              </span>
+            ) : (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpanded(true);
+                  toggleStatsForNerds();
+                }}
+                className="shrink-0 inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-medium bg-surface-elevated text-foreground-subtle border border-border/50 cursor-pointer hover:text-foreground"
+                title="Standard YouTube Music Opus stream (160-256kbps)"
+              >
+                {audioStats?.codec?.toUpperCase() || 'OPUS'}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Favorite Heart Button */}
