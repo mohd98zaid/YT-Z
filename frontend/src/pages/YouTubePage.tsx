@@ -107,7 +107,7 @@ export const YouTubePage: React.FC = () => {
     if (!searchQuery.trim()) return;
     setSearchLoading(true);
     try {
-      const data = await api.search(searchQuery, 'videos');
+      const data = await api.searchYouTubeVideos(searchQuery);
       setSearchResults(data || []);
     } catch (err) {
       console.error('Failed to search YouTube videos', err);
@@ -309,9 +309,14 @@ export const YouTubePage: React.FC = () => {
                   <h4 className="font-bold text-xs text-foreground line-clamp-2 group-hover:text-red-500 transition-colors">
                     {video.title}
                   </h4>
-                  <p className="text-[11px] text-foreground-muted truncate mt-1">
-                    {video.artist || (video as any).uploader || 'YouTube Video'}
-                  </p>
+                  <div className="flex items-center justify-between mt-1 text-[11px] text-foreground-muted">
+                    <span className="truncate">{video.artist || (video as any).uploader || 'YouTube Video'}</span>
+                    {(video as any).views && (
+                      <span className="shrink-0 font-medium text-foreground-subtle ml-1">
+                        {(video as any).views}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

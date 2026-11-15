@@ -24,6 +24,8 @@ export const api = {
       : `${API_BASE}/api/ytm/search?query=${encodeURIComponent(query)}`;
     return fetchJson<Track[]>(url);
   },
+  searchYouTubeVideos: (query: string, limit = 20) =>
+    fetchJson<Track[]>(`${API_BASE}/api/youtube/search?query=${encodeURIComponent(query)}&limit=${limit}`),
   getSuggestions: (query: string) => fetchJson<string[]>(`${API_BASE}/api/ytm/suggestions?query=${encodeURIComponent(query)}`),
   getArtist: (channelId: string) => fetchJson<any>(`${API_BASE}/api/ytm/artist/${channelId}`),
   getAlbum: (browseId: string) => fetchJson<any>(`${API_BASE}/api/ytm/album/${browseId}`),

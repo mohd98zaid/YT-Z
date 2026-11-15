@@ -33,6 +33,7 @@ from backend.api.downloader import DownloaderEngine
 from backend.api.spotify_importer import SpotifyImporter
 from backend.api.local_library import LocalLibrary
 from backend.api.plugins import PluginService
+from backend.api.youtube_search import YouTubeSearchService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,6 +69,7 @@ stream_resolver = StreamResolver()
 lyrics_engine = LyricsEngine(db_mgr)
 local_lib = LocalLibrary(config_mgr)
 plugin_svc = PluginService(db_mgr)
+yt_search_svc = YouTubeSearchService()
 
 # WebSocket Connection Manager
 class WSManager:
@@ -420,6 +422,12 @@ async def delete_plugin(plugin_id: str):
 async def test_plugin(plugin_id: str):
     result = plugin_svc.test_plugin(plugin_id)
     return result
+
+# ==================== General YouTube Search (Separate Service) ====================
+
+@app.get("/api/youtube/search")
+async def search_youtube_videos(query: str = Query(...), limit: int = Query(20)):
+    return await asyncio.to_thread(yt_search_svc.search, query, limit)
 
 # ==================== WebSocket Endpoint ====================
 
