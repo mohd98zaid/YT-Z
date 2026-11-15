@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Play, Download, Music, Video, User, Disc, ListMusic } from 'lucide-react';
 import { api } from '../services/api';
 import { Track } from '../types';
@@ -19,13 +19,14 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
   const { playTrack, setExpanded, setVideoMode } = usePlayerStore();
   const { queueDownload } = useDownloadStore();
 
-  const handleSearch = async (searchFilter?: string) => {
-    if (!query.trim()) return;
+  const executeSearch = async (searchQuery: string, searchFilter?: string) => {
+    const q = searchQuery.trim();
+    if (!q) return;
     setLoading(true);
     setSearched(true);
     const activeFilter = searchFilter !== undefined ? searchFilter : filter;
     try {
-      const data = await api.search(query, activeFilter || undefined);
+      const data = await api.search(q, activeFilter || undefined);
       setResults(data || []);
     } catch (err) {
       console.error('Search failed', err);
@@ -34,9 +35,48 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
     }
   };
 
+  // Sync and auto-search when initialQuery from Header updates
+  useEffect(() => {
+    if (initialQuery && initialQuery.trim()) {
+      setQuery(initialQuery);
+      executeSearch(initialQuery);
+    }
+  }, [initialQuery]);
+
   const handleFilterClick = (newFilter: string) => {
     setFilter(newFilter);
-    handleSearch(newFilter);
+    executeSearch(query, newFilter);
+  };
+
+  const handleItemClick = async (item: any) => {
+    const isSong = Boolean(item.videoId || item.duration);
+    if (isSong) {
+      playTrack(item, results.filter((x) => x.videoId || x.duration));
+    } else if (item.resultType === 'album' || item.resultType === 'playlist') {
+      const id = item.id || item.browseId;
+      if (id) {
+        try {
+          const data = item.resultType === 'playlist' ? await api.getPlaylist(id) : await api.getAlbum(id);
+          if (data && data.tracks && data.tracks.length > 0) {
+            playTrack(data.tracks[0], data.tracks);
+          }
+        } catch (err) {
+          console.error('Failed to load playlist/album tracks', err);
+        }
+      }
+    } else if (item.resultType === 'artist') {
+      const id = item.id || item.browseId;
+      if (id) {
+        try {
+          const data = await api.getArtist(id);
+          if (data && data.topSongs && data.topSongs.length > 0) {
+            playTrack(data.topSongs[0], data.topSongs);
+          }
+        } catch (err) {
+          console.error('Failed to load artist top songs', err);
+        }
+      }
+    }
   };
 
   const handleDownload = (e: React.MouseEvent, track: Track) => {
@@ -73,13 +113,13 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              onKeyDown={(e) => e.key === 'Enter' && executeSearch(query)}
               placeholder="Search artists, tracks, podcasts, albums..."
               className="w-full bg-surface border border-border focus:border-primary text-foreground placeholder:text-foreground-subtle text-base rounded-2xl pl-12 pr-4 py-3.5 outline-none transition-all shadow-inner focus:ring-2 focus:ring-primary/20"
             />
           </div>
           <button
-            onClick={() => handleSearch()}
+            onClick={() => executeSearch(query)}
             aria-label="Submit search"
             disabled={loading || !query.trim()}
             className="px-6 py-3.5 rounded-2xl bg-primary hover:bg-primary-hover text-white font-bold text-sm shadow-lg shadow-primary/25 disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
@@ -130,11 +170,7 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
             return (
               <div
                 key={item.id || idx}
-                onClick={() => {
-                  if (isSong) {
-                    playTrack(item, results.filter((x) => x.videoId || x.duration));
-                  }
-                }}
+                onClick={() => handleItemClick(item)}
                 className="flex items-center justify-between p-3.5 rounded-2xl bg-surface border border-border hover:border-primary/40 hover:bg-surface-elevated cursor-pointer group transition-all"
               >
                 <div className="flex items-center gap-4 min-w-0">
@@ -144,19 +180,24 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
                       alt=""
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
-                    {isSong && (
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                        <Play className="w-5 h-5 text-white fill-current ml-0.5" />
-                      </div>
-                    )}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <Play className="w-5 h-5 text-white fill-current ml-0.5" />
+                    </div>
                   </div>
                   <div className="min-w-0">
                     <h4 className="font-semibold text-sm text-foreground truncate group-hover:text-primary transition-colors">
                       {item.title}
                     </h4>
-                    <p className="text-xs text-foreground-muted truncate">
-                      {item.artist || item.uploader || item.resultType || 'Track'}
-                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-xs text-foreground-muted truncate">
+                        {item.artist || item.uploader || 'Track'}
+                      </p>
+                      {item.resultType && item.resultType !== 'song' && (
+                        <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-surface-elevated text-primary border border-primary/20 shrink-0">
+                          {item.resultType}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -184,11 +225,19 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
                       </button>
                     </>
                   )}
-                  {item.duration && (
+                  {item.duration ? (
                     <span className="text-xs font-mono text-foreground-subtle min-w-[45px] text-right">
                       {item.duration}
                     </span>
-                  )}
+                  ) : item.subscribers ? (
+                    <span className="text-xs font-mono text-foreground-subtle text-right">
+                      {item.subscribers}
+                    </span>
+                  ) : item.itemCount ? (
+                    <span className="text-xs font-mono text-foreground-subtle text-right">
+                      {item.itemCount}
+                    </span>
+                  ) : null}
                 </div>
               </div>
             );
