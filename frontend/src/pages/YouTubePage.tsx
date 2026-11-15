@@ -12,6 +12,7 @@ import {
   Tv,
   Check,
   Clipboard,
+  X,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Track } from '../types';
@@ -52,18 +53,13 @@ export const YouTubePage: React.FC = () => {
   const { playTrack, setExpanded, setVideoMode } = usePlayerStore();
   const { queueDownload } = useDownloadStore();
 
-  // Load Trending YouTube Videos on mount
+  // Load Trending YouTube Videos on mount (no automatic autoplay)
   useEffect(() => {
     setLoading(true);
     api.getCharts()
       .then((charts) => {
         if (charts && charts.videos && charts.videos.length > 0) {
           setTrendingVideos(charts.videos);
-          // Set first trending video as initial active video if none selected
-          const first = charts.videos[0];
-          setActiveVideoId(first.videoId || first.id);
-          setActiveVideoTitle(first.title);
-          setActiveVideoAuthor(first.artist);
         }
       })
       .catch((err) => console.error('Failed to load trending videos', err))
@@ -182,9 +178,23 @@ export const YouTubePage: React.FC = () => {
         </form>
       </div>
 
-      {/* Main Theater Player Section */}
+      {/* Main Theater Player Section (only when a video is selected) */}
       {activeVideoId ? (
-        <div className="bg-surface border border-border rounded-3xl p-5 shadow-2xl space-y-4 animate-fadeIn">
+        <div className="bg-surface border border-border rounded-3xl p-5 shadow-2xl space-y-4 animate-fadeIn relative">
+          <div className="flex items-center justify-between pb-1">
+            <span className="text-xs font-bold text-red-500 flex items-center gap-1.5 uppercase tracking-wider">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              Now Playing
+            </span>
+            <button
+              onClick={() => setActiveVideoId(null)}
+              className="flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground hover:bg-surface-elevated px-2.5 py-1 rounded-xl transition-colors border border-border/50"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Close Video</span>
+            </button>
+          </div>
+
           {/* 16:9 Cinema Screen */}
           <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black shadow-2xl border border-white/10 max-h-[65vh]">
             <iframe
@@ -247,7 +257,18 @@ export const YouTubePage: React.FC = () => {
             </div>
           </div>
         </div>
-      ) : null}
+      ) : (
+        /* Welcome Placeholder when no video is playing */
+        <div className="bg-gradient-to-r from-surface via-surface-elevated/40 to-surface border border-border rounded-3xl p-8 shadow-xl text-center flex flex-col items-center justify-center gap-3 animate-fadeIn">
+          <div className="w-14 h-14 rounded-3xl bg-red-600/10 text-red-500 border border-red-500/20 flex items-center justify-center shadow-lg">
+            <YouTubeIcon className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold text-foreground">Ready to Watch</h2>
+          <p className="text-xs text-foreground-muted max-w-md">
+            Paste any YouTube video link in the bar above, search for any video below, or click any video card to start playing.
+          </p>
+        </div>
+      )}
 
       {/* Search Any YouTube Video Section */}
       <div className="space-y-4">
