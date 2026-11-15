@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Compass, Trophy, Flame, Play, Download } from 'lucide-react';
+import { Compass, Trophy, Flame, Play, Download, Video } from 'lucide-react';
 import { api } from '../services/api';
 import { Track } from '../types';
 import { usePlayerStore } from '../stores/usePlayerStore';
@@ -16,7 +16,7 @@ export const ExplorePage: React.FC = () => {
   const [activeMoodTitle, setActiveMoodTitle] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
-  const { playTrack } = usePlayerStore();
+  const { playTrack, setExpanded, setVideoMode } = usePlayerStore();
   const { queueDownload } = useDownloadStore();
 
   useEffect(() => {
@@ -126,18 +126,27 @@ export const ExplorePage: React.FC = () => {
               {charts.videos.slice(0, 10).map((video, idx) => (
                 <div
                   key={video.id || idx}
-                  onClick={() => playTrack(video, charts.videos)}
+                  onClick={() => {
+                    playTrack(video, charts.videos);
+                    setVideoMode(true);
+                    setExpanded(true);
+                  }}
                   className="flex items-center justify-between p-2.5 rounded-2xl hover:bg-surface-elevated cursor-pointer group transition-all"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="text-sm font-bold font-mono text-foreground-subtle w-4 text-center group-hover:text-primary">
                       {idx + 1}
                     </span>
-                    <img
-                      src={video.thumbnail}
-                      alt=""
-                      className="w-11 h-11 rounded-xl object-cover shrink-0 shadow-md"
-                    />
+                    <div className="relative w-11 h-11 shrink-0">
+                      <img
+                        src={video.thumbnail}
+                        alt=""
+                        className="w-full h-full rounded-xl object-cover shadow-md"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-xl transition-opacity">
+                        <Video className="w-4 h-4 text-white" />
+                      </div>
+                    </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
                         {video.title}
@@ -146,6 +155,18 @@ export const ExplorePage: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        playTrack(video, charts.videos);
+                        setVideoMode(true);
+                        setExpanded(true);
+                      }}
+                      className="p-1.5 rounded-full hover:bg-surface text-foreground-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Watch Video"
+                    >
+                      <Video className="w-4 h-4" />
+                    </button>
                     <button
                       onClick={(e) => handleDownload(e, video)}
                       className="p-1.5 rounded-full hover:bg-surface text-foreground-muted hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"

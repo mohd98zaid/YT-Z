@@ -16,7 +16,7 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
-  const { playTrack } = usePlayerStore();
+  const { playTrack, setExpanded, setVideoMode } = usePlayerStore();
   const { queueDownload } = useDownloadStore();
 
   const handleSearch = async (searchFilter?: string) => {
@@ -160,15 +160,29 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   {isSong && (
-                    <button
-                      onClick={(e) => handleDownload(e, item)}
-                      title="Download 320k MP3"
-                      className="p-2 rounded-xl hover:bg-surface text-foreground-muted hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          playTrack(item, results.filter((x) => x.videoId || x.duration));
+                          setVideoMode(true);
+                          setExpanded(true);
+                        }}
+                        title="Watch YouTube Video"
+                        className="p-2 rounded-xl hover:bg-surface text-foreground-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Video className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => handleDownload(e, item)}
+                        title="Download 320k MP3"
+                        className="p-2 rounded-xl hover:bg-surface text-foreground-muted hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </>
                   )}
                   {item.duration && (
                     <span className="text-xs font-mono text-foreground-subtle min-w-[45px] text-right">
