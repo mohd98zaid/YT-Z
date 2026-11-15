@@ -111,6 +111,23 @@ export const api = {
       body: JSON.stringify(updates),
     }),
 
+  // Pluggable Sources & Extensions (BitChord / ytm-rs style)
+  getPlugins: () => fetchJson<any[]>(`${API_BASE}/api/plugins`),
+  togglePlugin: (id: string, enabled: boolean) =>
+    fetchJson<any>(`${API_BASE}/api/plugins/${id}/toggle`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }),
+  addPlugin: (payload: any) =>
+    fetchJson<any>(`${API_BASE}/api/plugins`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  deletePlugin: (id: string) => fetchJson<any>(`${API_BASE}/api/plugins/${id}`, { method: 'DELETE' }),
+  testPlugin: (id: string) => fetchJson<any>(`${API_BASE}/api/plugins/${id}/test`, { method: 'POST' }),
+
   // WebSocket
   createWebSocket: (onMessage: (data: any) => void) => {
     let ws: WebSocket | null = null;

@@ -81,3 +81,17 @@ export interface ThemePreset {
     accentHover: string;
   };
 }
+
+export interface PluginSource {
+  id: string;
+  name: string;
+  type: 'audio_source' | 'lyrics_source' | 'scrobbler' | 'enhancement' | 'audio_filter';
+  description: string;
+  endpoint: string;
+  api_key?: string;
+  enabled: boolean | number;
+  status: 'active' | 'degraded' | 'offline' | 'standby';
+  latency_ms: number;
+  icon?: string;
+  is_builtin: boolean | number;
+}

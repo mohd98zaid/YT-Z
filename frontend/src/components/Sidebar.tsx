@@ -9,10 +9,11 @@ import {
   Settings,
   Radio,
   Sparkles,
+  Puzzle,
 } from 'lucide-react';
 import { useDownloadStore } from '../stores/useDownloadStore';
 
-export type TabType = 'home' | 'explore' | 'search' | 'downloader' | 'spotify' | 'library' | 'settings';
+export type TabType = 'home' | 'explore' | 'search' | 'downloader' | 'spotify' | 'library' | 'plugins' | 'settings';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -32,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     { id: 'downloader', label: 'Downloader', icon: Download, badge: activeDownloadsCount },
     { id: 'spotify', label: 'Spotify Importer', icon: ListMusic },
     { id: 'library', label: 'My Library', icon: FolderHeart },
+    { id: 'plugins', label: 'Plugins & Sources', icon: Puzzle },
     { id: 'settings', label: 'Settings & Themes', icon: Settings },
   ];
 

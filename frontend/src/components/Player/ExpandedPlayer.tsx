@@ -19,6 +19,8 @@ import {
   Gauge,
   Video,
   Disc,
+  Moon,
+  Radio,
 } from 'lucide-react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { useDownloadStore } from '../../stores/useDownloadStore';
@@ -57,6 +59,14 @@ export const ExpandedPlayer: React.FC = () => {
     removeFromQueue,
     isVideoMode,
     setVideoMode,
+    sleepTimerRemaining,
+    sleepTimerStopAfterTrack,
+    toggleSleepTimer,
+    startRadio,
+    skipSilence,
+    toggleSkipSilence,
+    volumeNormalization,
+    toggleVolumeNormalization,
   } = usePlayerStore();
 
   const { queueDownload } = useDownloadStore();
@@ -145,6 +155,33 @@ export const ExpandedPlayer: React.FC = () => {
 
         {/* Right Action Icons */}
         <div className="flex items-center gap-2">
+          {/* Endless Song Radio */}
+          {!currentTrack.isLocal && (
+            <button
+              onClick={() => startRadio()}
+              title="Start Endless Song Radio"
+              className="p-2 rounded-full bg-surface-elevated/70 border border-border text-foreground-muted hover:text-primary transition-all hover:scale-105"
+            >
+              <Radio className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Sleep Timer */}
+          <button
+            onClick={toggleSleepTimer}
+            title="Sleep Timer"
+            className={`p-2 rounded-full border transition-all hover:scale-105 relative ${
+              sleepTimerRemaining !== null || sleepTimerStopAfterTrack
+                ? 'bg-primary/20 text-primary border-primary/40'
+                : 'bg-surface-elevated/70 text-foreground-muted border-border hover:text-foreground'
+            }`}
+          >
+            <Moon className="w-4 h-4" />
+            {(sleepTimerRemaining !== null || sleepTimerStopAfterTrack) && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-primary animate-ping" />
+            )}
+          </button>
+
           {/* Stats for nerds toggle */}
           <button
             onClick={toggleStatsForNerds}

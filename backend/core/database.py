@@ -91,6 +91,24 @@ class DatabaseManager:
             );
             """)
 
+            # Pluggable Sources & Extensions table (BitChord & ytm-rs style)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS plugins (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                description TEXT,
+                endpoint TEXT,
+                api_key TEXT,
+                enabled INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'active',
+                latency_ms INTEGER DEFAULT 0,
+                icon TEXT,
+                is_builtin INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+
             conn.commit()
 
     # ---- Download Operations ----
@@ -226,4 +244,49 @@ class DatabaseManager:
             INSERT OR REPLACE INTO lyrics_cache (key, lyrics_json, provider, cached_at)
             VALUES (?, ?, ?, CURRENT_TIMESTAMP)
             """, (key, json.dumps(lyrics), provider))
+            conn.commit()
+
+    # ---- Plugins & Pluggable Sources Operations ----
+
+    def get_all_plugins(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM plugins ORDER BY is_builtin DESC, type ASC, name ASC")
+            return [dict(r) for r in cursor.fetchall()]
+
+    def upsert_plugin(self, plugin: Dict[str, Any]) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT OR REPLACE INTO plugins (
+                id, name, type, description, endpoint, api_key,
+                enabled, status, latency_ms, icon, is_builtin
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                plugin["id"], plugin["name"], plugin["type"],
+                plugin.get("description", ""), plugin.get("endpoint", ""),
+                plugin.get("api_key", ""), 1 if plugin.get("enabled", True) else 0,
+                plugin.get("status", "active"), plugin.get("latency_ms", 0),
+                plugin.get("icon", "Puzzle"), 1 if plugin.get("is_builtin", False) else 0
+            ))
+            conn.commit()
+
+    def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE plugins SET enabled = ? WHERE id = ?", (1 if enabled else 0, plugin_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_plugin(self, plugin_id: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM plugins WHERE id = ? AND is_builtin = 0", (plugin_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_plugin_status(self, plugin_id: str, status: str, latency_ms: int) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE plugins SET status = ?, latency_ms = ? WHERE id = ?", (status, latency_ms, plugin_id))
             conn.commit()

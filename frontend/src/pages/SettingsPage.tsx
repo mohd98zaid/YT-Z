@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, Volume2, Download, ShieldCheck, Check, Sparkles, Folder } from 'lucide-react';
+import {
+  Palette,
+  Volume2,
+  Download,
+  ShieldCheck,
+  Check,
+  Sparkles,
+  Folder,
+  Radio,
+  Puzzle,
+  Sliders,
+  Moon,
+} from 'lucide-react';
 import { THEME_PRESETS } from '../themes/presets';
 import { useThemeStore } from '../stores/useThemeStore';
 import { usePlayerStore } from '../stores/usePlayerStore';
@@ -7,11 +19,20 @@ import { api } from '../services/api';
 
 export const SettingsPage: React.FC = () => {
   const { currentThemeId, setTheme } = useThemeStore();
-  const { crossfadeSeconds, setCrossfade } = usePlayerStore();
+  const {
+    crossfadeSeconds,
+    setCrossfade,
+    skipSilence,
+    toggleSkipSilence,
+    volumeNormalization,
+    toggleVolumeNormalization,
+  } = usePlayerStore();
 
   const [downloadDir, setDownloadDir] = useState('');
   const [concurrency, setConcurrency] = useState(3);
   const [sponsorblockEnabled, setSponsorblockEnabled] = useState(true);
+  const [discordRpcEnabled, setDiscordRpcEnabled] = useState(true);
+  const [lastfmUser, setLastfmUser] = useState('');
   const [embedThumbnail, setEmbedThumbnail] = useState(true);
   const [embedMetadata, setEmbedMetadata] = useState(true);
   const [embedSubtitles, setEmbedSubtitles] = useState(false);
@@ -275,6 +296,111 @@ export const SettingsPage: React.FC = () => {
             >
               Apply All Settings
             </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Connectivity & Audio DSP Tweaks (BitChord & ytm-rs features) */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Radio className="w-6 h-6 text-primary" />
+          <h2 className="text-xl font-bold text-foreground">
+            Connectivity & Audio DSP Tweaks (from BitChord & ytm-rs)
+          </h2>
+        </div>
+
+        <div className="bg-surface border border-border rounded-3xl p-6 shadow-xl space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Skip Silence Switch */}
+            <div className="p-4 rounded-2xl bg-surface-elevated border border-border/60 flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-sm text-foreground flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-emerald-400" />
+                  <span>Skip Silence</span>
+                </h4>
+                <p className="text-xs text-foreground-muted mt-1">
+                  Truncate silent intros/outros and pauses between tracks automatically.
+                </p>
+              </div>
+              <button
+                onClick={toggleSkipSilence}
+                className={`w-12 h-6 rounded-full p-1 transition-colors relative flex items-center ml-4 shrink-0 ${
+                  skipSilence ? 'bg-primary' : 'bg-surface border border-border'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                    skipSilence ? 'translate-x-6' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Volume Normalization Switch */}
+            <div className="p-4 rounded-2xl bg-surface-elevated border border-border/60 flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-sm text-foreground flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-primary" />
+                  <span>ReplayGain Loudness Leveling</span>
+                </h4>
+                <p className="text-xs text-foreground-muted mt-1">
+                  Normalize master loudness to -14 LUFS standard across all albums.
+                </p>
+              </div>
+              <button
+                onClick={toggleVolumeNormalization}
+                className={`w-12 h-6 rounded-full p-1 transition-colors relative flex items-center ml-4 shrink-0 ${
+                  volumeNormalization ? 'bg-primary' : 'bg-surface border border-border'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                    volumeNormalization ? 'translate-x-6' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Discord RPC Switch */}
+            <div className="p-4 rounded-2xl bg-surface-elevated border border-border/60 flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-sm text-foreground flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-purple-400" />
+                  <span>Discord Rich Presence</span>
+                </h4>
+                <p className="text-xs text-foreground-muted mt-1">
+                  Display current track, cover art, and progress on your Discord profile.
+                </p>
+              </div>
+              <button
+                onClick={() => setDiscordRpcEnabled(!discordRpcEnabled)}
+                className={`w-12 h-6 rounded-full p-1 transition-colors relative flex items-center ml-4 shrink-0 ${
+                  discordRpcEnabled ? 'bg-primary' : 'bg-surface border border-border'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                    discordRpcEnabled ? 'translate-x-6' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Pluggable Sources Quick Jump */}
+            <div className="p-4 rounded-2xl bg-surface-elevated border border-border/60 flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-sm text-foreground flex items-center gap-2">
+                  <Puzzle className="w-4 h-4 text-pink-400" />
+                  <span>Pluggable Module Sources</span>
+                </h4>
+                <p className="text-xs text-foreground-muted mt-1">
+                  Manage Hi-Res FLAC modules, lyrics providers, and scrobblers.
+                </p>
+              </div>
+              <span className="text-xs font-bold text-primary px-3 py-1.5 rounded-xl bg-primary/10 border border-primary/20 shrink-0 ml-4">
+                Active in Sidebar
+              </span>
+            </div>
           </div>
         </div>
       </section>

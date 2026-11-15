@@ -32,6 +32,7 @@ from backend.api.lyrics import LyricsEngine
 from backend.api.downloader import DownloaderEngine
 from backend.api.spotify_importer import SpotifyImporter
 from backend.api.local_library import LocalLibrary
+from backend.api.plugins import PluginService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,6 +67,7 @@ ytmusic_svc = YTMusicService()
 stream_resolver = StreamResolver()
 lyrics_engine = LyricsEngine(db_mgr)
 local_lib = LocalLibrary(config_mgr)
+plugin_svc = PluginService(db_mgr)
 
 # WebSocket Connection Manager
 class WSManager:
@@ -389,6 +391,35 @@ async def add_favorite(payload: Dict[str, Any] = Body(...)):
 async def remove_favorite(video_id: str):
     success = db_mgr.remove_favorite(video_id)
     return {"status": "ok", "removed": success}
+
+# ==================== Pluggable Sources & Extensions Endpoints ====================
+
+@app.get("/api/plugins")
+async def get_plugins():
+    return plugin_svc.list_plugins()
+
+class TogglePluginRequest(BaseModel):
+    enabled: bool
+
+@app.put("/api/plugins/{plugin_id}/toggle")
+async def toggle_plugin(plugin_id: str, req: TogglePluginRequest):
+    success = plugin_svc.toggle_plugin(plugin_id, req.enabled)
+    return {"status": "ok" if success else "error"}
+
+@app.post("/api/plugins")
+async def add_plugin(payload: Dict[str, Any] = Body(...)):
+    plugin = plugin_svc.add_custom_plugin(payload)
+    return {"status": "ok", "plugin": plugin}
+
+@app.delete("/api/plugins/{plugin_id}")
+async def delete_plugin(plugin_id: str):
+    success = plugin_svc.delete_custom_plugin(plugin_id)
+    return {"status": "ok" if success else "error"}
+
+@app.post("/api/plugins/{plugin_id}/test")
+async def test_plugin(plugin_id: str):
+    result = plugin_svc.test_plugin(plugin_id)
+    return result
 
 # ==================== WebSocket Endpoint ====================
 

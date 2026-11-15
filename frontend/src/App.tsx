@@ -11,6 +11,8 @@ import { DownloaderPage } from './pages/DownloaderPage';
 import { SpotifyImporterPage } from './pages/SpotifyImporterPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { PluginsPage } from './pages/PluginsPage';
+import { SleepTimerModal } from './components/Player/SleepTimerModal';
 import { useThemeStore } from './stores/useThemeStore';
 import { useDownloadStore } from './stores/useDownloadStore';
 import { usePlayerStore } from './stores/usePlayerStore';
@@ -55,6 +57,7 @@ export const App: React.FC = () => {
           {activeTab === 'downloader' && <DownloaderPage />}
           {activeTab === 'spotify' && <SpotifyImporterPage />}
           {activeTab === 'library' && <LibraryPage />}
+          {activeTab === 'plugins' && <PluginsPage />}
           {activeTab === 'settings' && <SettingsPage />}
         </main>
 
@@ -67,6 +70,9 @@ export const App: React.FC = () => {
 
       {/* Studio Graphic Equalizer Modal */}
       <EqualizerModal />
+
+      {/* Sleep Timer Modal */}
+      <SleepTimerModal />
     </div>
   );
 };

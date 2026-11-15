@@ -17,6 +17,8 @@ import {
   Heart,
   Info,
   Video,
+  Moon,
+  Radio,
 } from 'lucide-react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { useDownloadStore } from '../../stores/useDownloadStore';
@@ -38,6 +40,8 @@ export const MiniPlayer: React.FC = () => {
     isEqualizerOpen,
     isQueueOpen,
     lastSkippedNotice,
+    sleepTimerRemaining,
+    sleepTimerStopAfterTrack,
     togglePlay,
     next,
     previous,
@@ -52,6 +56,8 @@ export const MiniPlayer: React.FC = () => {
     toggleEqualizer,
     toggleQueue,
     toggleStatsForNerds,
+    toggleSleepTimer,
+    startRadio,
   } = usePlayerStore();
 
   const { queueDownload } = useDownloadStore();
@@ -304,6 +310,33 @@ export const MiniPlayer: React.FC = () => {
           }`}
         >
           <ListMusic className="w-4 h-4" />
+        </button>
+
+        {/* Start Song Radio (ytm-rs & BitChord) */}
+        {!currentTrack.isLocal && (
+          <button
+            onClick={() => startRadio()}
+            title="Start Endless Song Radio"
+            className="p-2 rounded-xl text-foreground-muted hover:text-primary hover:bg-surface-elevated transition-all"
+          >
+            <Radio className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Sleep Timer (BitChord & ytm-rs) */}
+        <button
+          onClick={toggleSleepTimer}
+          title="Sleep Timer"
+          className={`p-2 rounded-xl transition-all relative ${
+            sleepTimerRemaining !== null || sleepTimerStopAfterTrack
+              ? 'bg-primary/20 text-primary border border-primary/30'
+              : 'text-foreground-muted hover:text-foreground hover:bg-surface-elevated'
+          }`}
+        >
+          <Moon className="w-4 h-4" />
+          {(sleepTimerRemaining !== null || sleepTimerStopAfterTrack) && (
+            <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-primary animate-ping" />
+          )}
         </button>
 
         {/* Volume Slider */}

@@ -57,6 +57,14 @@ interface PlayerState {
   showStatsForNerds: boolean;
   audioStats: AudioStats | null;
 
+  // Sleep Timer & Audio Tweaks (BitChord & ytm-rs features)
+  sleepTimerMinutes: number | null;
+  sleepTimerRemaining: number | null;
+  sleepTimerStopAfterTrack: boolean;
+  isSleepTimerOpen: boolean;
+  skipSilence: boolean;
+  volumeNormalization: boolean;
+
   // Actions
   playTrack: (track: Track, newQueue?: Track[]) => Promise<void>;
   togglePlay: () => void;
@@ -78,6 +86,11 @@ interface PlayerState {
   toggleEqualizer: () => void;
   toggleQueue: () => void;
   toggleStatsForNerds: () => void;
+  toggleSleepTimer: () => void;
+  setSleepTimer: (minutes: number | null, stopAfterTrack?: boolean) => void;
+  toggleSkipSilence: () => void;
+  toggleVolumeNormalization: () => void;
+  startRadio: (track?: Track) => Promise<void>;
   addToQueue: (track: Track) => void;
   removeFromQueue: (index: number) => void;
   clearQueue: () => void;
@@ -165,7 +178,11 @@ function initAudioEngine(state: PlayerState) {
   });
 
   audioElement.addEventListener('ended', () => {
-    const { repeatMode, next } = usePlayerStore.getState();
+    const { repeatMode, next, sleepTimerStopAfterTrack } = usePlayerStore.getState();
+    if (sleepTimerStopAfterTrack) {
+      usePlayerStore.setState({ isPlaying: false, sleepTimerStopAfterTrack: false });
+      return;
+    }
     if (repeatMode === 'one' && audioElement) {
       audioElement.currentTime = 0;
       audioElement.play();
@@ -218,6 +235,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   isQueueOpen: false,
   showStatsForNerds: false,
   audioStats: null,
+
+  sleepTimerMinutes: null,
+  sleepTimerRemaining: null,
+  sleepTimerStopAfterTrack: false,
+  isSleepTimerOpen: false,
+  skipSilence: false,
+  volumeNormalization: false,
 
   playTrack: async (track: Track, newQueue?: Track[]) => {
     initAudioEngine(get());
@@ -460,6 +484,80 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   toggleEqualizer: () => set((s) => ({ isEqualizerOpen: !s.isEqualizerOpen })),
   toggleQueue: () => set((s) => ({ isQueueOpen: !s.isQueueOpen })),
   toggleStatsForNerds: () => set((s) => ({ showStatsForNerds: !s.showStatsForNerds })),
+  toggleSleepTimer: () => set((s) => ({ isSleepTimerOpen: !s.isSleepTimerOpen })),
+
+  setSleepTimer: (minutes: number | null, stopAfterTrack = false) => {
+    if ((window as any).__ytz_sleep_interval) {
+      clearInterval((window as any).__ytz_sleep_interval);
+      (window as any).__ytz_sleep_interval = null;
+    }
+
+    if (minutes === null && !stopAfterTrack) {
+      set({ sleepTimerMinutes: null, sleepTimerRemaining: null, sleepTimerStopAfterTrack: false });
+      return;
+    }
+
+    if (stopAfterTrack) {
+      set({ sleepTimerMinutes: null, sleepTimerRemaining: null, sleepTimerStopAfterTrack: true });
+      return;
+    }
+
+    const totalSeconds = (minutes || 15) * 60;
+    set({
+      sleepTimerMinutes: minutes,
+      sleepTimerRemaining: totalSeconds,
+      sleepTimerStopAfterTrack: false,
+    });
+
+    (window as any).__ytz_sleep_interval = setInterval(() => {
+      const remaining = get().sleepTimerRemaining;
+      if (remaining === null || remaining <= 1) {
+        clearInterval((window as any).__ytz_sleep_interval);
+        (window as any).__ytz_sleep_interval = null;
+        // Fade out gently
+        if (audioElement) {
+          let v = audioElement.volume;
+          const fade = setInterval(() => {
+            v = Math.max(0, v - 0.1);
+            if (audioElement) audioElement.volume = v;
+            if (v <= 0.05) {
+              clearInterval(fade);
+              audioElement?.pause();
+              set({ isPlaying: false, sleepTimerMinutes: null, sleepTimerRemaining: null });
+              if (audioElement) audioElement.volume = get().volume;
+            }
+          }, 150);
+        } else {
+          set({ isPlaying: false, sleepTimerMinutes: null, sleepTimerRemaining: null });
+        }
+      } else {
+        set({ sleepTimerRemaining: remaining - 1 });
+      }
+    }, 1000);
+  },
+
+  toggleSkipSilence: () => set((s) => ({ skipSilence: !s.skipSilence })),
+  toggleVolumeNormalization: () => set((s) => ({ volumeNormalization: !s.volumeNormalization })),
+
+  startRadio: async (track?: Track) => {
+    const target = track || get().currentTrack;
+    if (!target) return;
+    const videoId = target.videoId || target.id;
+    try {
+      const radioTracks = await api.getRadio(videoId);
+      if (radioTracks && radioTracks.length > 0) {
+        set({
+          queue: [target, ...radioTracks],
+          queueIndex: 0,
+        });
+        if (!get().isPlaying) {
+          await get().playTrack(target);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to start radio stream', err);
+    }
+  },
 
   addToQueue: (track: Track) => {
     set((s) => ({ queue: [...s.queue, track] }));
