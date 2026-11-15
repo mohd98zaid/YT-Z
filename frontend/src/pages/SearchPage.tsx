@@ -80,6 +80,7 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
           </div>
           <button
             onClick={() => handleSearch()}
+            aria-label="Submit search"
             disabled={loading || !query.trim()}
             className="px-6 py-3.5 rounded-2xl bg-primary hover:bg-primary-hover text-white font-bold text-sm shadow-lg shadow-primary/25 disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
           >

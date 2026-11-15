@@ -133,7 +133,7 @@ export const MiniPlayer: React.FC = () => {
       {/* Left: Track Information */}
       <div className="flex items-center gap-3 w-1/4 min-w-[200px]">
         <div
-          className="relative w-13 h-13 rounded-xl overflow-hidden shadow-lg border border-border shrink-0 cursor-pointer group"
+          className="relative w-14 h-14 rounded-xl overflow-hidden shadow-lg border border-border shrink-0 cursor-pointer group"
           onClick={() => setExpanded(true)}
         >
           <img
