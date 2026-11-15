@@ -64,6 +64,8 @@ export const ExpandedPlayer: React.FC = () => {
     toggleEqualizer,
     toggleStatsForNerds,
     playTrack,
+    pause,
+    setActiveVideoSource,
     removeFromQueue,
     isVideoMode,
     setVideoMode,
@@ -112,11 +114,31 @@ export const ExpandedPlayer: React.FC = () => {
     }
   }, [isVideoMode, currentTrack?.id]);
 
+  // Listen for YouTube embed play events to ensure music is paused
+  React.useEffect(() => {
+    if (!isVideoMode) return;
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (data && data.event === 'infoDelivery' && data.info) {
+          if (data.info.playerState === 1) {
+            pause();
+            setActiveVideoSource('expanded_video');
+          }
+        }
+      } catch {}
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [isVideoMode, pause, setActiveVideoSource]);
+
   const currentVideoId =
     matchedVideos[matchedIndex] || (currentTrack ? currentTrack.videoId || currentTrack.id : '');
 
   const handleRedirectToInternalYouTube = () => {
     if (!currentTrack) return;
+    setVideoMode(false);
+    setActiveVideoSource(null);
     setExpanded(false);
     navigateToYouTube({
       id: currentVideoId,
@@ -178,7 +200,13 @@ export const ExpandedPlayer: React.FC = () => {
       {/* Top Header Bar */}
       <header className="relative z-10 flex items-center justify-between px-8 py-5 border-b border-border/40">
         <button
-          onClick={() => setExpanded(false)}
+          onClick={() => {
+            setExpanded(false);
+            if (isVideoMode) {
+              setVideoMode(false);
+              setActiveVideoSource(null);
+            }
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-elevated/70 border border-border text-foreground-muted hover:text-foreground text-xs font-semibold backdrop-blur-md transition-all hover:scale-105"
         >
           <ChevronDown className="w-4 h-4" />
@@ -272,7 +300,10 @@ export const ExpandedPlayer: React.FC = () => {
           {!currentTrack.isLocal && (
             <div className="flex items-center gap-1 p-1 rounded-full bg-surface-elevated/80 border border-border mb-3 backdrop-blur-md shadow-lg shrink-0">
               <button
-                onClick={() => setVideoMode(false)}
+                onClick={() => {
+                  setVideoMode(false);
+                  setActiveVideoSource(null);
+                }}
                 className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
                   !isVideoMode
                     ? 'bg-primary text-white shadow-md shadow-primary/20'
@@ -285,9 +316,8 @@ export const ExpandedPlayer: React.FC = () => {
               <button
                 onClick={() => {
                   setVideoMode(true);
-                  if (isPlaying) {
-                    togglePlay();
-                  }
+                  pause();
+                  setActiveVideoSource('expanded_video');
                 }}
                 className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
                   isVideoMode
@@ -306,7 +336,7 @@ export const ExpandedPlayer: React.FC = () => {
               <div className="relative w-full aspect-video rounded-3xl overflow-hidden shadow-2xl border border-white/10 bg-black animate-fadeIn max-h-[45vh]">
                 <iframe
                   key={currentVideoId}
-                  src={`https://www.youtube-nocookie.com/embed/${currentVideoId}?autoplay=1&controls=1&modestbranding=1&rel=0&iv_load_policy=3`}
+                  src={`https://www.youtube-nocookie.com/embed/${currentVideoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&rel=0&iv_load_policy=3`}
                   title={currentTrack.title}
                   className="w-full h-full border-0"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -340,7 +370,10 @@ export const ExpandedPlayer: React.FC = () => {
 
                 {/* Return to Song Artwork */}
                 <button
-                  onClick={() => setVideoMode(false)}
+                  onClick={() => {
+                    setVideoMode(false);
+                    setActiveVideoSource(null);
+                  }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-elevated/70 hover:bg-surface-elevated text-foreground-muted hover:text-foreground text-[11px] font-bold transition-all"
                 >
                   <Disc className="w-3 h-3" />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Play,
   Search,
@@ -50,10 +50,65 @@ export const YouTubePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [copiedToast, setCopiedToast] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  const { playTrack, setExpanded, setVideoMode } = usePlayerStore();
+  const { isPlaying, pause, setActiveVideoSource, playTrack } = usePlayerStore();
   const { queueDownload } = useDownloadStore();
   const youtubeSelectedVideo = useNavigationStore((s) => s.youtubeSelectedVideo);
+
+  // 1. When video becomes active in YouTube Theater, immediately pause music playback
+  useEffect(() => {
+    if (activeVideoId) {
+      pause();
+      setActiveVideoSource('youtube_theater');
+    } else {
+      if (usePlayerStore.getState().activeVideoSource === 'youtube_theater') {
+        setActiveVideoSource(null);
+      }
+    }
+  }, [activeVideoId, pause, setActiveVideoSource]);
+
+  // Clean up active video source on unmount
+  useEffect(() => {
+    return () => {
+      if (usePlayerStore.getState().activeVideoSource === 'youtube_theater') {
+        usePlayerStore.getState().setActiveVideoSource(null);
+      }
+    };
+  }, []);
+
+  // 2. If music starts playing anywhere, pause the active YouTube video iframe
+  useEffect(() => {
+    if (isPlaying && activeVideoId && iframeRef.current?.contentWindow) {
+      try {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
+          '*'
+        );
+      } catch (err) {
+        console.debug('Failed to pause iframe video', err);
+      }
+    }
+  }, [isPlaying, activeVideoId]);
+
+  // 3. Listen to YouTube embed events (when user clicks play inside embed iframe)
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (data && data.event === 'infoDelivery' && data.info) {
+          // playerState 1 = PLAYING
+          if (data.info.playerState === 1) {
+            usePlayerStore.getState().pause();
+            usePlayerStore.getState().setActiveVideoSource('youtube_theater');
+          }
+        }
+      } catch {}
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   // Auto-play video redirected from other components
   useEffect(() => {
@@ -199,7 +254,18 @@ export const YouTubePage: React.FC = () => {
               Now Playing
             </span>
             <button
-              onClick={() => setActiveVideoId(null)}
+              onClick={() => {
+                if (iframeRef.current?.contentWindow) {
+                  try {
+                    iframeRef.current.contentWindow.postMessage(
+                      JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
+                      '*'
+                    );
+                  } catch {}
+                }
+                setActiveVideoId(null);
+                setActiveVideoSource(null);
+              }}
               className="flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground hover:bg-surface-elevated px-2.5 py-1 rounded-xl transition-colors border border-border/50"
             >
               <X className="w-3.5 h-3.5" />
@@ -210,7 +276,8 @@ export const YouTubePage: React.FC = () => {
           {/* 16:9 Cinema Screen */}
           <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black shadow-2xl border border-white/10 max-h-[65vh]">
             <iframe
-              src={`https://www.youtube-nocookie.com/embed/${activeVideoId}?autoplay=1&controls=1&modestbranding=1&rel=0&iv_load_policy=3`}
+              ref={iframeRef}
+              src={`https://www.youtube-nocookie.com/embed/${activeVideoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&rel=0&iv_load_policy=3`}
               title={activeVideoTitle}
               className="w-full h-full border-0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -226,15 +293,28 @@ export const YouTubePage: React.FC = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {/* Play Audio in Global Player */}
+              {/* Play Audio in Global Player (seamless transition from video to audio) */}
               <button
                 onClick={() => {
+                  if (iframeRef.current?.contentWindow) {
+                    try {
+                      iframeRef.current.contentWindow.postMessage(
+                        JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
+                        '*'
+                      );
+                    } catch {}
+                  }
+                  const vId = activeVideoId;
+                  const vTitle = activeVideoTitle;
+                  const vAuthor = activeVideoAuthor;
+                  setActiveVideoId(null);
+                  setActiveVideoSource(null);
                   playTrack({
-                    id: activeVideoId,
-                    videoId: activeVideoId,
-                    title: activeVideoTitle,
-                    artist: activeVideoAuthor,
-                    thumbnail: `https://i.ytimg.com/vi/${activeVideoId}/hqdefault.jpg`,
+                    id: vId,
+                    videoId: vId,
+                    title: vTitle,
+                    artist: vAuthor,
+                    thumbnail: `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`,
                     duration: '0:00',
                     durationSeconds: 0,
                   });

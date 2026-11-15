@@ -75,6 +75,12 @@ interface PlayerState {
   skipSilence: boolean;
   volumeNormalization: boolean;
 
+  // Video vs Audio Mutually Exclusive Playback Control
+  activeVideoSource: string | null;
+  setActiveVideoSource: (source: string | null) => void;
+  pause: () => void;
+  play: () => void;
+
   // Actions
   playTrack: (track: Track, newQueue?: Track[]) => Promise<void>;
   togglePlay: () => void;
@@ -263,8 +269,47 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   skipSilence: false,
   volumeNormalization: false,
 
+  // Video vs Audio Mutually Exclusive Playback Control
+  activeVideoSource: null,
+  setActiveVideoSource: (source: string | null) => {
+    if (source) {
+      if (audioElement && !audioElement.paused) {
+        audioElement.pause();
+      }
+      set({ activeVideoSource: source, isPlaying: false });
+    } else {
+      set({ activeVideoSource: null });
+    }
+  },
+
+  pause: () => {
+    if (audioElement && !audioElement.paused) {
+      audioElement.pause();
+    }
+    set({ isPlaying: false });
+  },
+
+  play: () => {
+    initAudioEngine(get());
+    if (!audioElement || !get().currentTrack) return;
+    if (audioContext && audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    if (get().isVideoMode) {
+      set({ isVideoMode: false });
+    }
+    set({ activeVideoSource: null });
+    audioElement.play().catch(() => {});
+    set({ isPlaying: true });
+  },
+
   playTrack: async (track: Track, newQueue?: Track[]) => {
     initAudioEngine(get());
+
+    if (get().isVideoMode) {
+      set({ isVideoMode: false });
+    }
+    set({ activeVideoSource: null });
 
     let queue = get().queue;
     let queueIndex = get().queueIndex;
@@ -403,7 +448,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       audioContext.resume();
     }
     if (audioElement.paused) {
-      audioElement.play();
+      if (get().isVideoMode) {
+        set({ isVideoMode: false });
+      }
+      set({ activeVideoSource: null });
+      audioElement.play().catch(() => {});
       set({ isPlaying: true });
     } else {
       audioElement.pause();

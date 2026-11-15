@@ -41,6 +41,7 @@ export const MiniPlayer: React.FC = () => {
     isQueueOpen,
     lastSkippedNotice,
     audioStats,
+    activeVideoSource,
     sleepTimerRemaining,
     sleepTimerStopAfterTrack,
     togglePlay,
@@ -187,6 +188,14 @@ export const MiniPlayer: React.FC = () => {
                 title="Standard YouTube Music Opus stream (160-256kbps)"
               >
                 {audioStats?.codec?.toUpperCase() || 'OPUS'}
+              </span>
+            )}
+            {activeVideoSource && (
+              <span
+                className="shrink-0 inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-red-600/20 text-red-400 border border-red-500/30 animate-pulse"
+                title="Audio playback is paused while video is active"
+              >
+                Video Active
               </span>
             )}
           </div>
