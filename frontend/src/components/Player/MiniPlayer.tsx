@@ -47,6 +47,7 @@ export const MiniPlayer: React.FC = () => {
     toggleShuffle,
     cycleRepeat,
     setExpanded,
+    setVideoMode,
     toggleLyrics,
     toggleEqualizer,
     toggleQueue,
@@ -255,7 +256,10 @@ export const MiniPlayer: React.FC = () => {
         {/* Watch Music Video */}
         {!currentTrack.isLocal && (
           <button
-            onClick={() => setExpanded(true)}
+            onClick={() => {
+              setVideoMode(true);
+              setExpanded(true);
+            }}
             title="Watch Music Video"
             className="p-2 rounded-xl text-foreground-muted hover:text-primary hover:bg-surface-elevated transition-all"
           >

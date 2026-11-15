@@ -50,6 +50,7 @@ interface PlayerState {
 
   // Modals & Panels
   isExpanded: boolean;
+  isVideoMode: boolean;
   isLyricsOpen: boolean;
   isEqualizerOpen: boolean;
   isQueueOpen: boolean;
@@ -72,6 +73,7 @@ interface PlayerState {
   setEqPreset: (presetName: string) => void;
   toggleEq: () => void;
   setExpanded: (expanded: boolean) => void;
+  setVideoMode: (video: boolean) => void;
   toggleLyrics: () => void;
   toggleEqualizer: () => void;
   toggleQueue: () => void;
@@ -210,6 +212,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 
   isExpanded: false,
+  isVideoMode: false,
   isLyricsOpen: false,
   isEqualizerOpen: false,
   isQueueOpen: false,
@@ -452,6 +455,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setExpanded: (expanded: boolean) => set({ isExpanded: expanded }),
+  setVideoMode: (video: boolean) => set({ isVideoMode: video }),
   toggleLyrics: () => set((s) => ({ isLyricsOpen: !s.isLyricsOpen })),
   toggleEqualizer: () => set((s) => ({ isEqualizerOpen: !s.isEqualizerOpen })),
   toggleQueue: () => set((s) => ({ isQueueOpen: !s.isQueueOpen })),
