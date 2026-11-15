@@ -15,6 +15,10 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   // Discovery
   getHome: () => fetchJson<any[]>(`${API_BASE}/api/ytm/home`),
+  getQuickPicks: (refresh = false, mood?: string, limit = 10) =>
+    fetchJson<Track[]>(
+      `${API_BASE}/api/ytm/quick-picks?refresh=${refresh}${mood ? `&mood=${encodeURIComponent(mood)}` : ''}&limit=${limit}`
+    ),
   getCharts: (country = 'US') => fetchJson<any>(`${API_BASE}/api/ytm/charts?country=${country}`),
   getMoodCategories: () => fetchJson<Record<string, any[]>>(`${API_BASE}/api/ytm/moods`),
   getMoodPlaylists: (params: string) => fetchJson<any[]>(`${API_BASE}/api/ytm/moods/playlists?params=${encodeURIComponent(params)}`),

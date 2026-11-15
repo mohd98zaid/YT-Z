@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Play, Download, Sparkles, TrendingUp, Music, Disc3 } from 'lucide-react';
+import { Play, Download, Sparkles, TrendingUp, Music, Disc3, RefreshCw } from 'lucide-react';
 import { api } from '../services/api';
 import { Track } from '../types';
 import { usePlayerStore } from '../stores/usePlayerStore';
@@ -8,6 +8,8 @@ import { useDownloadStore } from '../stores/useDownloadStore';
 export const HomePage: React.FC = () => {
   const [sections, setSections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshingQuickPicks, setIsRefreshingQuickPicks] = useState(false);
+  const [quickPicksMood, setQuickPicksMood] = useState('all');
   const { playTrack } = usePlayerStore();
   const { queueDownload } = useDownloadStore();
 
@@ -20,6 +22,26 @@ export const HomePage: React.FC = () => {
       setLoading(false);
     });
   }, []);
+
+  const handleRefreshQuickPicks = async (mood = quickPicksMood) => {
+    setIsRefreshingQuickPicks(true);
+    try {
+      const freshPicks = await api.getQuickPicks(true, mood, 10);
+      if (freshPicks && freshPicks.length > 0) {
+        setSections((prev) =>
+          prev.map((sec) =>
+            sec.title.toLowerCase().includes('quick')
+              ? { ...sec, items: freshPicks }
+              : sec
+          )
+        );
+      }
+    } catch (err) {
+      console.error('Failed to refresh quick picks', err);
+    } finally {
+      setIsRefreshingQuickPicks(false);
+    }
+  };
 
   const handleDownload = (e: React.MouseEvent, track: Track) => {
     e.stopPropagation();
@@ -64,16 +86,68 @@ export const HomePage: React.FC = () => {
       </div>
 
       {/* Dynamic Sections from YouTube Music */}
-      {sections.map((section, sIdx) => (
-        <section key={sIdx} className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-foreground tracking-tight flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-primary" />
-              <span>{section.title}</span>
-            </h2>
-          </div>
+      {sections.map((section, sIdx) => {
+        const isQuickPicks = section.title.toLowerCase().includes('quick');
+        return (
+          <section key={sIdx} className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-primary" />
+                <h2 className="text-xl font-bold text-foreground tracking-tight">{section.title}</h2>
+                {isQuickPicks && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-primary/15 text-primary border border-primary/25">
+                    Dynamic
+                  </span>
+                )}
+              </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {isQuickPicks && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Mood Filter Pills for Quick Picks */}
+                  <div className="flex items-center gap-1 p-1 bg-surface-elevated/70 border border-border/80 rounded-xl">
+                    {[
+                      { id: 'all', label: 'All' },
+                      { id: 'trending', label: 'Trending' },
+                      { id: 'chill', label: 'Chill' },
+                      { id: 'upbeat', label: 'Upbeat' },
+                      { id: 'romantic', label: 'Romance' },
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          setQuickPicksMood(m.id);
+                          handleRefreshQuickPicks(m.id);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                          quickPicksMood === m.id
+                            ? 'bg-primary text-white shadow-sm shadow-primary/25'
+                            : 'text-foreground-muted hover:text-foreground'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Refresh Quick Picks Button */}
+                  <button
+                    onClick={() => handleRefreshQuickPicks(quickPicksMood)}
+                    disabled={isRefreshingQuickPicks}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface border border-border hover:border-primary/50 text-xs font-bold text-foreground hover:bg-surface-elevated shadow-sm transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+                    title="Refresh Quick picks with new fresh tracks"
+                  >
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${
+                        isRefreshingQuickPicks ? 'animate-spin text-primary' : 'text-primary'
+                      }`}
+                    />
+                    <span>{isRefreshingQuickPicks ? 'Refreshing...' : 'Refresh'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {section.items.map((item: any, iIdx: number) => {
               const isSong = Boolean(item.videoId || item.duration);
               return (
@@ -143,7 +217,7 @@ export const HomePage: React.FC = () => {
             })}
           </div>
         </section>
-      ))}
+      ); })}
     </div>
   );
 };

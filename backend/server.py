@@ -135,6 +135,14 @@ async def update_config(payload: Dict[str, Any] = Body(...)):
 async def get_ytm_home():
     return ytmusic_svc.get_home()
 
+@app.get("/api/ytm/quick-picks")
+async def get_quick_picks(
+    refresh: bool = Query(False),
+    mood: Optional[str] = Query(None),
+    limit: int = Query(10)
+):
+    return ytmusic_svc.get_quick_picks(refresh=refresh, mood=mood, limit=limit)
+
 @app.get("/api/ytm/charts")
 async def get_ytm_charts(country: str = Query("US")):
     return ytmusic_svc.get_charts(country)

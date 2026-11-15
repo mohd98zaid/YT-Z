@@ -3,6 +3,7 @@ YouTube Music API Service for YT-Z.
 Integrates with InnerTube / ytmusicapi to provide full music discovery,
 search, charts, mood categories, and radio recommendation.
 """
+import random
 import logging
 from typing import Dict, Any, List, Optional
 from ytmusicapi import YTMusic
@@ -11,6 +12,7 @@ logger = logging.getLogger("YTZ.YTMusic")
 
 class YTMusicService:
     def __init__(self):
+        self._quick_picks_cache: List[Dict[str, Any]] = []
         try:
             self.yt = YTMusic()
             logger.info("Initialized YTMusic anonymous client")
@@ -94,39 +96,104 @@ class YTMusicService:
             "isExplicit": item.get("isExplicit", False),
         }
 
+    def get_quick_picks(self, refresh: bool = False, mood: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Fetch varied, dynamically refreshed quick picks.
+        If refresh=True or cache is empty, gathers candidates from YouTube Music's
+        Quick picks section, Top Charts, and trending genres, and yields a fresh shuffled selection.
+        """
+        if refresh or not self._quick_picks_cache or (mood and mood.lower() != "all"):
+            candidates = []
+            seen_ids = set()
+
+            # 1. If mood is requested, query mood / genre
+            if mood and mood.lower() != "all":
+                try:
+                    search_results = self.search(f"{mood} hits songs", filter_type="songs")
+                    for t in search_results:
+                        vid = t.get("videoId") or t.get("id")
+                        if vid and vid not in seen_ids:
+                            seen_ids.add(vid)
+                            candidates.append(t)
+                except Exception as ex:
+                    logger.debug(f"Mood quick picks search failed: {ex}")
+
+            # 2. Get songs from home feed Quick picks
+            try:
+                home_data = self.yt.get_home(limit=8)
+                for sec in home_data:
+                    title = sec.get("title", "").lower()
+                    if any(k in title for k in ("quick", "picks", "songs", "tracks")):
+                        for item in sec.get("contents", []):
+                            vid = item.get("videoId")
+                            if vid and vid not in seen_ids:
+                                seen_ids.add(vid)
+                                candidates.append(self._normalize_track(item))
+            except Exception as e:
+                logger.debug(f"Error fetching home quick picks pool: {e}")
+
+            # 3. Add Top Charts songs to broaden variety
+            try:
+                charts = self.get_charts(country="US")
+                for s in charts.get("songs", []):
+                    vid = s.get("videoId") or s.get("id")
+                    if vid and vid not in seen_ids:
+                        seen_ids.add(vid)
+                        candidates.append(s)
+            except Exception as e:
+                logger.debug(f"Error fetching charts pool: {e}")
+
+            if candidates:
+                self._quick_picks_cache = candidates
+
+        pool = list(self._quick_picks_cache)
+        if not pool:
+            return []
+
+        # Return a randomized sample
+        count = min(limit, len(pool))
+        return random.sample(pool, count)
+
     def get_home(self) -> List[Dict[str, Any]]:
         """Fetch personalized / trending home feed sections"""
         if not self.yt:
             return []
         try:
-            home_data = self.yt.get_home(limit=6)
+            home_data = self.yt.get_home(limit=8)
             sections = []
             for section in home_data:
                 title = section.get("title", "")
                 contents = section.get("contents", [])
                 items = []
-                for item in contents:
-                    video_id = item.get("videoId")
-                    if video_id:
-                        items.append(self._normalize_track(item))
-                    else:
-                        # Playlist or Album item in home
-                        browse_id = item.get("browseId") or item.get("playlistId") or ""
-                        is_playlist = (
-                            browse_id.startswith("RDCL") or
-                            browse_id.startswith("PL") or
-                            browse_id.startswith("VL") or
-                            browse_id.startswith("RD") or
-                            "playlist" in str(browse_id).lower()
-                        )
-                        items.append({
-                            "id": browse_id,
-                            "browseId": browse_id,
-                            "title": item.get("title", ""),
-                            "subtitle": item.get("description") or (", ".join([a.get("name", "") for a in item.get("artists", []) if isinstance(a, dict)]) if item.get("artists") else ""),
-                            "thumbnail": self._normalize_thumbnail(item.get("thumbnails")),
-                            "type": "playlist" if is_playlist else "album"
-                        })
+
+                if "quick" in title.lower():
+                    fresh_picks = self.get_quick_picks(refresh=False, limit=10)
+                    if fresh_picks:
+                        items = fresh_picks
+
+                if not items:
+                    for item in contents:
+                        video_id = item.get("videoId")
+                        if video_id:
+                            items.append(self._normalize_track(item))
+                        else:
+                            # Playlist or Album item in home
+                            browse_id = item.get("browseId") or item.get("playlistId") or ""
+                            is_playlist = (
+                                browse_id.startswith("RDCL") or
+                                browse_id.startswith("PL") or
+                                browse_id.startswith("VL") or
+                                browse_id.startswith("RD") or
+                                "playlist" in str(browse_id).lower()
+                            )
+                            items.append({
+                                "id": browse_id,
+                                "browseId": browse_id,
+                                "title": item.get("title", ""),
+                                "subtitle": item.get("description") or (", ".join([a.get("name", "") for a in item.get("artists", []) if isinstance(a, dict)]) if item.get("artists") else ""),
+                                "thumbnail": self._normalize_thumbnail(item.get("thumbnails")),
+                                "type": "playlist" if is_playlist else "album"
+                            })
                 if items:
                     sections.append({
                         "title": title,
