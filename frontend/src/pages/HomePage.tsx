@@ -79,9 +79,19 @@ export const HomePage: React.FC = () => {
               return (
                 <div
                   key={iIdx}
-                  onClick={() => {
+                  onClick={async () => {
                     if (isSong) {
                       playTrack(item, section.items.filter((x: any) => x.videoId || x.duration));
+                    } else if (item.id || item.browseId) {
+                      const id = item.id || item.browseId;
+                      try {
+                        const data = item.type === 'playlist' ? await api.getPlaylist(id) : await api.getAlbum(id);
+                        if (data && data.tracks && data.tracks.length > 0) {
+                          playTrack(data.tracks[0], data.tracks);
+                        }
+                      } catch (err) {
+                        console.error('Failed to load playlist/album', err);
+                      }
                     }
                   }}
                   className="group relative bg-surface border border-border hover:border-primary/40 rounded-2xl p-3.5 flex flex-col justify-between cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl"
@@ -95,19 +105,17 @@ export const HomePage: React.FC = () => {
                     />
                     {/* Hover Overlay Play & Download Buttons */}
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                      <div className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-transform">
+                        <Play className="w-5 h-5 fill-current ml-0.5" />
+                      </div>
                       {isSong && (
-                        <>
-                          <div className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-transform">
-                            <Play className="w-5 h-5 fill-current ml-0.5" />
-                          </div>
-                          <button
-                            onClick={(e) => handleDownload(e, item)}
-                            title="Download 320k MP3"
-                            className="w-9 h-9 rounded-full bg-surface-elevated/90 hover:bg-surface-elevated text-white flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-transform border border-white/20"
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
-                        </>
+                        <button
+                          onClick={(e) => handleDownload(e, item)}
+                          title="Download 320k MP3"
+                          className="w-9 h-9 rounded-full bg-surface-elevated/90 hover:bg-surface-elevated text-white flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-transform border border-white/20"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
                       )}
                     </div>
                   </div>

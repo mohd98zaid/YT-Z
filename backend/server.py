@@ -11,11 +11,12 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Body, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Body, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
+import requests
 import uvicorn
 
 # Ensure project root is in sys.path
@@ -181,6 +182,55 @@ async def get_audio_stream(video_id: str):
     if not stream_info:
         raise HTTPException(status_code=500, detail="Could not resolve audio stream for track.")
     return stream_info
+
+@app.get("/api/stream/{video_id}/audio")
+def stream_audio_proxy(video_id: str, request: Request):
+    """
+    Audio streaming proxy with HTTP 206 Partial Content Range support.
+    Eliminates browser CORS blocks and enables native Web Audio API equalizer processing.
+    """
+    stream_info = stream_resolver.resolve_audio(video_id)
+    if not stream_info:
+        raise HTTPException(status_code=404, detail="Could not resolve audio stream for track.")
+    
+    googlevideo_url = stream_info.get("streamUrl")
+    if not googlevideo_url:
+        raise HTTPException(status_code=404, detail="No stream URL available.")
+
+    range_header = request.headers.get("Range")
+    remote_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    if range_header:
+        remote_headers["Range"] = range_header
+
+    try:
+        resp = requests.get(googlevideo_url, headers=remote_headers, stream=True, timeout=12)
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Type": resp.headers.get("Content-Type", "audio/webm"),
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+        }
+        if "Content-Range" in resp.headers:
+            headers["Content-Range"] = resp.headers["Content-Range"]
+        if "Content-Length" in resp.headers:
+            headers["Content-Length"] = resp.headers["Content-Length"]
+
+        def chunk_generator():
+            for chunk in resp.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    yield chunk
+
+        return StreamingResponse(
+            chunk_generator(),
+            status_code=resp.status_code,
+            headers=headers,
+            media_type=headers["Content-Type"]
+        )
+    except Exception as e:
+        logger.error(f"Error proxying audio for {video_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch audio: {e}")
 
 @app.get("/api/stream/{video_id}/segments")
 async def get_skip_segments(video_id: str):

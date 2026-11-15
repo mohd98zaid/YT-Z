@@ -262,33 +262,48 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       if (track.isLocal && track.filePath) {
         streamUrl = `http://127.0.0.1:47892/api/library/stream?path=${encodeURIComponent(track.filePath)}`;
         codec = track.filePath.split('.').pop() || 'mp3';
+        set({
+          audioStats: {
+            codec,
+            bitrate,
+            duration: track.durationSeconds || 0,
+            provider: 'Local Storage',
+          },
+        });
       } else {
-        const streamInfo = await api.getAudioStream(track.videoId || track.id);
-        streamUrl = streamInfo.streamUrl;
-        codec = streamInfo.codec;
-        bitrate = streamInfo.bitrate;
+        const videoId = track.videoId || track.id;
+        // Use local range-aware audio streaming proxy to completely eliminate CORS restrictions
+        streamUrl = `http://127.0.0.1:47892/api/stream/${encodeURIComponent(videoId)}/audio`;
+
+        // Fetch stream metadata in background
+        api.getAudioStream(videoId).then((streamInfo) => {
+          set({
+            audioStats: {
+              codec: streamInfo.codec,
+              bitrate: streamInfo.bitrate,
+              duration: track.durationSeconds || streamInfo.duration || 0,
+              provider: 'InnerTube Audio Proxy',
+            },
+          });
+        }).catch(() => {});
 
         // Fetch SponsorBlock skip segments in background
-        api.getSkipSegments(track.videoId || track.id).then((segs) => {
+        api.getSkipSegments(videoId).then((segs) => {
           set({ skipSegments: segs || [] });
         }).catch(() => {});
       }
-
-      set({
-        audioStats: {
-          codec,
-          bitrate,
-          duration: track.durationSeconds || 0,
-          provider: track.isLocal ? 'Local Storage' : 'InnerTube Googlevideo',
-        },
-      });
 
       if (audioElement) {
         audioElement.src = streamUrl;
         audioElement.playbackRate = get().playbackSpeed;
         audioElement.volume = get().isMuted ? 0 : get().volume;
-        await audioElement.play();
-        set({ isPlaying: true, isLoading: false });
+        try {
+          await audioElement.play();
+          set({ isPlaying: true, isLoading: false });
+        } catch (playErr) {
+          console.warn('Playback deferred or blocked by browser autoplay policy', playErr);
+          set({ isPlaying: false, isLoading: false });
+        }
       }
 
       // Fetch Lyrics in background

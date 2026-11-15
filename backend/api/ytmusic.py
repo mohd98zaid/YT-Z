@@ -136,20 +136,55 @@ class YTMusicService:
             return {"songs": [], "videos": [], "artists": []}
         try:
             charts = self.yt.get_charts(country=country)
-            songs = [self._normalize_track(s) for s in charts.get("songs", {}).get("items", [])]
-            videos = [self._normalize_track(v) for v in charts.get("videos", {}).get("items", [])]
+            
+            # 1. Parse Artists
             artists = []
-            for a in charts.get("artists", {}).get("items", []):
-                artists.append({
-                    "id": a.get("browseId", ""),
-                    "name": a.get("title", ""),
-                    "thumbnail": self._normalize_thumbnail(a.get("thumbnails")),
-                    "rank": a.get("rank", ""),
-                    "subscribers": a.get("subscribers", "")
-                })
+            raw_artists = charts.get("artists")
+            if isinstance(raw_artists, dict):
+                raw_artists = raw_artists.get("items", [])
+            if isinstance(raw_artists, list):
+                for a in raw_artists:
+                    if isinstance(a, dict):
+                        artists.append({
+                            "id": a.get("browseId", ""),
+                            "name": a.get("title", ""),
+                            "thumbnail": self._normalize_thumbnail(a.get("thumbnails")),
+                            "rank": a.get("rank", ""),
+                            "subscribers": a.get("subscribers", "")
+                        })
+
+            # 2. Parse Songs / Videos from charts playlists
+            songs = []
+            videos = []
+            raw_videos = charts.get("videos")
+            if isinstance(raw_videos, dict):
+                raw_videos = raw_videos.get("items", [])
+
+            # If videos is a list of playlists (e.g. Daily Top Music Videos)
+            if isinstance(raw_videos, list) and len(raw_videos) > 0:
+                first_pl = raw_videos[0]
+                if isinstance(first_pl, dict) and first_pl.get("playlistId"):
+                    try:
+                        pl_data = self.get_playlist(first_pl["playlistId"])
+                        all_tracks = pl_data.get("tracks", [])
+                        songs = all_tracks[:30]
+                        videos = all_tracks[30:60] if len(all_tracks) > 30 else all_tracks[:30]
+                    except Exception as ex:
+                        logger.debug(f"Failed to fetch charts playlist: {ex}")
+                elif isinstance(first_pl, dict) and (first_pl.get("videoId") or first_pl.get("id")):
+                    videos = [self._normalize_track(v) for v in raw_videos if isinstance(v, dict)]
+
+            # If songs still empty, query top songs playlist or search
+            if not songs:
+                try:
+                    fallback_pl = self.get_playlist("PL4fGSI1pDJn6t3TXLGiiJdD-sZbrG3tG0")
+                    songs = fallback_pl.get("tracks", [])[:30]
+                except Exception:
+                    songs = self.search("Top Hits 2026", filter_type="songs")[:20]
+
             return {
                 "songs": songs,
-                "videos": videos,
+                "videos": videos if videos else songs[:15],
                 "artists": artists
             }
         except Exception as e:
