@@ -21,9 +21,14 @@ import {
   Disc,
   Moon,
   Radio,
+  ExternalLink,
+  RefreshCw,
+  Tv,
 } from 'lucide-react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { useDownloadStore } from '../../stores/useDownloadStore';
+import { useNavigationStore } from '../../stores/useNavigationStore';
+import { api } from '../../services/api';
 import { LyricsView } from '../Lyrics/LyricsView';
 
 export const ExpandedPlayer: React.FC = () => {
@@ -70,8 +75,58 @@ export const ExpandedPlayer: React.FC = () => {
   } = usePlayerStore();
 
   const { queueDownload } = useDownloadStore();
+  const { navigateToYouTube } = useNavigationStore();
   const [activeTab, setActiveTab] = useState<'lyrics' | 'queue'>('lyrics');
   const [downloadQueued, setDownloadQueued] = useState(false);
+  const [matchedVideos, setMatchedVideos] = useState<string[]>([]);
+  const [matchedIndex, setMatchedIndex] = useState(0);
+  const [resolvingVideo, setResolvingVideo] = useState(false);
+
+  // Automatically resolve official embeddable public video when entering Watch Video mode
+  React.useEffect(() => {
+    if (isVideoMode && currentTrack && !currentTrack.isLocal) {
+      const rawId = currentTrack.videoId || currentTrack.id;
+      setResolvingVideo(true);
+      api.searchYouTubeVideos(`${currentTrack.title} ${currentTrack.artist} official video`, 4)
+        .then((vids) => {
+          if (vids && vids.length > 0) {
+            // Priority: #1 top public search match, then raw ID, then alternate matches
+            const topMatch = vids[0].videoId || vids[0].id;
+            const rest = vids.slice(1).map((v) => v.videoId || v.id).filter(Boolean);
+            const combined = Array.from(new Set([topMatch, rawId, ...rest]));
+            setMatchedVideos(combined);
+            setMatchedIndex(0);
+          } else {
+            setMatchedVideos([rawId]);
+            setMatchedIndex(0);
+          }
+        })
+        .catch(() => {
+          setMatchedVideos([rawId]);
+          setMatchedIndex(0);
+        })
+        .finally(() => setResolvingVideo(false));
+    }
+  }, [isVideoMode, currentTrack?.id]);
+
+  const currentVideoId =
+    matchedVideos[matchedIndex] || (currentTrack ? currentTrack.videoId || currentTrack.id : '');
+
+  const handleRedirectToInternalYouTube = () => {
+    if (!currentTrack) return;
+    setExpanded(false);
+    navigateToYouTube({
+      id: currentVideoId,
+      title: currentTrack.title,
+      artist: currentTrack.artist,
+    });
+  };
+
+  const handleCycleAlternateVideo = () => {
+    if (matchedVideos.length > 1) {
+      setMatchedIndex((prev) => (prev + 1) % matchedVideos.length);
+    }
+  };
 
   if (!isExpanded || !currentTrack) return null;
 
@@ -244,14 +299,51 @@ export const ExpandedPlayer: React.FC = () => {
           )}
 
           {isVideoMode && !currentTrack.isLocal ? (
-            <div className="relative w-full aspect-video rounded-3xl overflow-hidden shadow-2xl border border-white/10 bg-black animate-fadeIn max-h-[45vh]">
-              <iframe
-                src={`https://www.youtube-nocookie.com/embed/${currentTrack.videoId || currentTrack.id}?autoplay=1&controls=1&modestbranding=1&rel=0`}
-                title={currentTrack.title}
-                className="w-full h-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
+            <div className="w-full flex flex-col items-center gap-2.5">
+              <div className="relative w-full aspect-video rounded-3xl overflow-hidden shadow-2xl border border-white/10 bg-black animate-fadeIn max-h-[45vh]">
+                <iframe
+                  key={currentVideoId}
+                  src={`https://www.youtube-nocookie.com/embed/${currentVideoId}?autoplay=1&controls=1&modestbranding=1&rel=0&iv_load_policy=3`}
+                  title={currentTrack.title}
+                  className="w-full h-full border-0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              </div>
+
+              {/* Fallback & Internal YouTube Redirect Actions Toolbar */}
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1 animate-fadeIn">
+                {/* Redirect to Internal YouTube Theater */}
+                <button
+                  onClick={handleRedirectToInternalYouTube}
+                  title="Watch inside internal YouTube Video Theater"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-red-600 hover:bg-red-500 text-white text-[11px] font-bold shadow-md shadow-red-600/25 transition-all hover:scale-105 active:scale-95"
+                >
+                  <Tv className="w-3.5 h-3.5" />
+                  <span>Open in YouTube Theater</span>
+                </button>
+
+                {/* Try Alternate YouTube Video from Search */}
+                {matchedVideos.length > 1 && (
+                  <button
+                    onClick={handleCycleAlternateVideo}
+                    title="Switch to alternative YouTube video source"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-surface-elevated hover:bg-border/60 text-foreground text-[11px] font-bold border border-border transition-all hover:scale-105 active:scale-95"
+                  >
+                    <RefreshCw className={`w-3 h-3 text-primary ${resolvingVideo ? 'animate-spin' : ''}`} />
+                    <span>Try Alternate Video ({matchedIndex + 1}/{matchedVideos.length})</span>
+                  </button>
+                )}
+
+                {/* Return to Song Artwork */}
+                <button
+                  onClick={() => setVideoMode(false)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-elevated/70 hover:bg-surface-elevated text-foreground-muted hover:text-foreground text-[11px] font-bold transition-all"
+                >
+                  <Disc className="w-3 h-3" />
+                  <span>Song Deck</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="relative group w-48 h-48 sm:w-64 sm:h-64 md:w-72 md:h-72 lg:w-80 lg:h-80 max-h-[38vh] max-w-[38vh]">

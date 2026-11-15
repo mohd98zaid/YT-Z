@@ -18,6 +18,7 @@ import { api } from '../services/api';
 import { Track } from '../types';
 import { usePlayerStore } from '../stores/usePlayerStore';
 import { useDownloadStore } from '../stores/useDownloadStore';
+import { useNavigationStore } from '../stores/useNavigationStore';
 
 // Authentic YouTube Play Icon
 const YouTubeIcon: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
@@ -52,6 +53,17 @@ export const YouTubePage: React.FC = () => {
 
   const { playTrack, setExpanded, setVideoMode } = usePlayerStore();
   const { queueDownload } = useDownloadStore();
+  const youtubeSelectedVideo = useNavigationStore((s) => s.youtubeSelectedVideo);
+
+  // Auto-play video redirected from other components
+  useEffect(() => {
+    if (youtubeSelectedVideo && youtubeSelectedVideo.id) {
+      setActiveVideoId(youtubeSelectedVideo.id);
+      setActiveVideoTitle(youtubeSelectedVideo.title);
+      setActiveVideoAuthor(youtubeSelectedVideo.artist || 'YouTube');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [youtubeSelectedVideo]);
 
   // Load Trending YouTube Videos on mount (no automatic autoplay)
   useEffect(() => {

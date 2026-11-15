@@ -17,9 +17,10 @@ import { SleepTimerModal } from './components/Player/SleepTimerModal';
 import { useThemeStore } from './stores/useThemeStore';
 import { useDownloadStore } from './stores/useDownloadStore';
 import { usePlayerStore } from './stores/usePlayerStore';
+import { useNavigationStore } from './stores/useNavigationStore';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<TabType>('home');
+  const { activeTab, setActiveTab } = useNavigationStore();
   const [searchQuery, setSearchQuery] = useState('');
   const { initTheme } = useThemeStore();
   const { initWebSocket } = useDownloadStore();
