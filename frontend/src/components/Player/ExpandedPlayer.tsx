@@ -93,15 +93,15 @@ export const ExpandedPlayer: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background/95 select-none overflow-hidden animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex flex-col bg-background select-none overflow-hidden animate-fadeIn">
       {/* Blurred Ambient Backdrop Canvas */}
       <div
-        className="absolute inset-0 bg-cover bg-center filter blur-3xl opacity-35 scale-125 pointer-events-none transition-all duration-1000"
+        className="absolute inset-0 bg-cover bg-center filter blur-3xl opacity-40 scale-125 pointer-events-none transition-all duration-1000"
         style={{
           backgroundImage: `url(${currentTrack.thumbnail})`,
         }}
       />
-      <div className="absolute inset-0 bg-background/70 backdrop-blur-3xl pointer-events-none" />
+      <div className="absolute inset-0 bg-background/85 backdrop-blur-3xl pointer-events-none" />
 
       {/* Top Header Bar */}
       <header className="relative z-10 flex items-center justify-between px-8 py-5 border-b border-border/40">

@@ -13,12 +13,14 @@ import { LibraryPage } from './pages/LibraryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { useThemeStore } from './stores/useThemeStore';
 import { useDownloadStore } from './stores/useDownloadStore';
+import { usePlayerStore } from './stores/usePlayerStore';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [searchQuery, setSearchQuery] = useState('');
   const { initTheme } = useThemeStore();
   const { initWebSocket } = useDownloadStore();
+  const isExpanded = usePlayerStore((s) => s.isExpanded);
 
   useEffect(() => {
     initTheme();
@@ -57,7 +59,7 @@ export const App: React.FC = () => {
         </main>
 
         {/* Docked Mini Player */}
-        <MiniPlayer />
+        {!isExpanded && <MiniPlayer />}
       </div>
 
       {/* Expanded Fullscreen Player Overlay */}
