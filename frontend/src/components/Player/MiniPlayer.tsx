@@ -16,6 +16,7 @@ import {
   Download,
   Heart,
   Info,
+  Video,
 } from 'lucide-react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { useDownloadStore } from '../../stores/useDownloadStore';
@@ -250,6 +251,17 @@ export const MiniPlayer: React.FC = () => {
         >
           <Download className="w-4 h-4" />
         </button>
+
+        {/* Watch Music Video */}
+        {!currentTrack.isLocal && (
+          <button
+            onClick={() => setExpanded(true)}
+            title="Watch Music Video"
+            className="p-2 rounded-xl text-foreground-muted hover:text-primary hover:bg-surface-elevated transition-all"
+          >
+            <Video className="w-4 h-4" />
+          </button>
+        )}
 
         {/* Synced Lyrics Toggle */}
         <button

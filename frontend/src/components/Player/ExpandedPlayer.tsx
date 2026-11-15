@@ -17,6 +17,8 @@ import {
   Info,
   Clock,
   Gauge,
+  Video,
+  Disc,
 } from 'lucide-react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { useDownloadStore } from '../../stores/useDownloadStore';
@@ -57,6 +59,7 @@ export const ExpandedPlayer: React.FC = () => {
 
   const { queueDownload } = useDownloadStore();
   const [activeTab, setActiveTab] = useState<'lyrics' | 'queue'>('lyrics');
+  const [viewMode, setViewMode] = useState<'song' | 'video'>('song');
   const [downloadQueued, setDownloadQueued] = useState(false);
 
   if (!isExpanded || !currentTrack) return null;
@@ -167,29 +170,74 @@ export const ExpandedPlayer: React.FC = () => {
 
       {/* Main Center Area: Split Artwork & Lyrics/Queue */}
       <div className="relative z-10 flex-1 flex flex-col md:flex-row items-center justify-between p-8 md:p-12 gap-8 overflow-hidden">
-        {/* Left: Album Artwork with Vinyl Animation */}
-        <div className="w-full md:w-1/2 flex flex-col items-center justify-center max-w-lg">
-          <div className="relative group w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96">
-            {/* Spinning Vinyl Record Layer Behind Artwork */}
-            <div
-              className={`absolute -right-8 top-1/2 -translate-y-1/2 w-56 h-56 sm:w-72 sm:h-72 md:w-84 md:h-84 rounded-full bg-zinc-950 border-4 border-zinc-800 shadow-2xl flex items-center justify-center ${
-                isPlaying ? 'animate-spin-slow' : ''
-              }`}
-            >
-              <div className="w-24 h-24 rounded-full border-4 border-zinc-700/80 bg-zinc-900 flex items-center justify-center">
-                <div className="w-6 h-6 rounded-full bg-primary/80" />
-              </div>
+        {/* Left: Album Artwork with Vinyl Animation OR Embedded YouTube Video */}
+        <div className="w-full md:w-1/2 flex flex-col items-center justify-center max-w-xl">
+          {/* Song vs Video Mode Toggle Pill */}
+          {!currentTrack.isLocal && (
+            <div className="flex items-center gap-1 p-1 rounded-full bg-surface-elevated/80 border border-border mb-6 backdrop-blur-md shadow-lg">
+              <button
+                onClick={() => setViewMode('song')}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                  viewMode === 'song'
+                    ? 'bg-primary text-white shadow-md shadow-primary/20'
+                    : 'text-foreground-muted hover:text-foreground'
+                }`}
+              >
+                <Disc className="w-3.5 h-3.5" />
+                <span>Song & Vinyl</span>
+              </button>
+              <button
+                onClick={() => {
+                  setViewMode('video');
+                  if (isPlaying) {
+                    togglePlay();
+                  }
+                }}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                  viewMode === 'video'
+                    ? 'bg-primary text-white shadow-md shadow-primary/20'
+                    : 'text-foreground-muted hover:text-foreground'
+                }`}
+              >
+                <Video className="w-3.5 h-3.5" />
+                <span>Watch Video</span>
+              </button>
             </div>
+          )}
 
-            {/* High-res Full-bleed Cover Artwork */}
-            <div className="relative w-full h-full rounded-3xl overflow-hidden shadow-2xl border border-white/10 z-10 bg-surface">
-              <img
-                src={currentTrack.thumbnail || '/placeholder.png'}
-                alt={currentTrack.title}
-                className="w-full h-full object-cover"
+          {viewMode === 'video' && !currentTrack.isLocal ? (
+            <div className="relative w-full aspect-video rounded-3xl overflow-hidden shadow-2xl border border-white/10 bg-black animate-fadeIn">
+              <iframe
+                src={`https://www.youtube-nocookie.com/embed/${currentTrack.videoId || currentTrack.id}?autoplay=1&controls=1&modestbranding=1&rel=0`}
+                title={currentTrack.title}
+                className="w-full h-full border-0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
               />
             </div>
-          </div>
+          ) : (
+            <div className="relative group w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96">
+              {/* Spinning Vinyl Record Layer Behind Artwork */}
+              <div
+                className={`absolute -right-8 top-1/2 -translate-y-1/2 w-56 h-56 sm:w-72 sm:h-72 md:w-84 md:h-84 rounded-full bg-zinc-950 border-4 border-zinc-800 shadow-2xl flex items-center justify-center ${
+                  isPlaying ? 'animate-spin-slow' : ''
+                }`}
+              >
+                <div className="w-24 h-24 rounded-full border-4 border-zinc-700/80 bg-zinc-900 flex items-center justify-center">
+                  <div className="w-6 h-6 rounded-full bg-primary/80" />
+                </div>
+              </div>
+
+              {/* High-res Full-bleed Cover Artwork */}
+              <div className="relative w-full h-full rounded-3xl overflow-hidden shadow-2xl border border-white/10 z-10 bg-surface">
+                <img
+                  src={currentTrack.thumbnail || '/placeholder.png'}
+                  alt={currentTrack.title}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Track Details */}
           <div className="mt-8 text-center w-full px-4">
