@@ -45,6 +45,42 @@ def wait_for_server(timeout: int = 15) -> bool:
         time.sleep(0.3)
     return False
 
+def patch_edgechromium_fullscreen():
+    """
+    Hooks Microsoft Edge WebView2 ContainsFullScreenElementChanged event
+    so that when any HTML5 element (YouTube video player, fullscreen button, or F11)
+    enters fullscreen, the native desktop window automatically toggles into true borderless
+    fullscreen without window borders or taskbar, and restores cleanly on exit.
+    """
+    try:
+        import webview.platforms.edgechromium as ec
+        original_on_webview_ready = ec.EdgeChrome.on_webview_ready
+
+        def hooked_on_webview_ready(self, sender, args):
+            original_on_webview_ready(self, sender, args)
+            if not getattr(args, "IsSuccess", False):
+                return
+
+            def on_fullscreen_changed(c_sender, c_args):
+                try:
+                    is_fs = bool(c_sender.ContainsFullScreenElement)
+                    if hasattr(self, "form") and self.form:
+                        current_fs = bool(getattr(self.form, "is_fullscreen", False))
+                        if is_fs != current_fs and hasattr(self.form, "toggle_fullscreen"):
+                            self.form.toggle_fullscreen()
+                except Exception as ex:
+                    logger.debug(f"Fullscreen change handler note: {ex}")
+
+            try:
+                sender.CoreWebView2.ContainsFullScreenElementChanged += on_fullscreen_changed
+                logger.info("Successfully hooked WebView2 ContainsFullScreenElementChanged for native desktop fullscreen")
+            except Exception as ex:
+                logger.debug(f"Could not register ContainsFullScreenElementChanged: {ex}")
+
+        ec.EdgeChrome.on_webview_ready = hooked_on_webview_ready
+    except Exception as e:
+        logger.debug(f"EdgeChromium patch note: {e}")
+
 def main():
     print("=" * 65)
     print("           YT-Z: Ultimate YouTube Music & Downloader")
@@ -70,7 +106,8 @@ def main():
     if not force_browser:
         try:
             import webview
-            print("[*] Launching native desktop window via pywebview...")
+            patch_edgechromium_fullscreen()
+            print("[*] Launching native desktop window via pywebview (with true fullscreen support)...")
             window = webview.create_window(
                 title="YT-Z - Ultimate YouTube Music & Downloader",
                 url=APP_URL,

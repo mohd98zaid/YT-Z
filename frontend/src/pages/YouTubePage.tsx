@@ -50,7 +50,34 @@ export const YouTubePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [copiedToast, setCopiedToast] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const videoContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Monitor fullscreen state
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  const handleToggleFullscreen = () => {
+    const el = videoContainerRef.current || iframeRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      if (el.requestFullscreen) {
+        el.requestFullscreen().catch(() => {});
+      } else if ((el as any).webkitRequestFullscreen) {
+        (el as any).webkitRequestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  };
 
   const { isPlaying, pause, setActiveVideoSource, playTrack } = usePlayerStore();
   const { queueDownload } = useDownloadStore();
@@ -253,34 +280,47 @@ export const YouTubePage: React.FC = () => {
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
               Now Playing
             </span>
-            <button
-              onClick={() => {
-                if (iframeRef.current?.contentWindow) {
-                  try {
-                    iframeRef.current.contentWindow.postMessage(
-                      JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
-                      '*'
-                    );
-                  } catch {}
-                }
-                setActiveVideoId(null);
-                setActiveVideoSource(null);
-              }}
-              className="flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground hover:bg-surface-elevated px-2.5 py-1 rounded-xl transition-colors border border-border/50"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Close Video</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleToggleFullscreen}
+                className="flex items-center gap-1.5 text-xs font-semibold text-foreground-muted hover:text-foreground hover:bg-surface-elevated px-3 py-1 rounded-xl transition-colors border border-border/50"
+                title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'Enter Fullscreen (F)'}
+              >
+                <Maximize2 className="w-3.5 h-3.5 text-red-500" />
+                <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (iframeRef.current?.contentWindow) {
+                    try {
+                      iframeRef.current.contentWindow.postMessage(
+                        JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
+                        '*'
+                      );
+                    } catch {}
+                  }
+                  setActiveVideoId(null);
+                  setActiveVideoSource(null);
+                }}
+                className="flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground hover:bg-surface-elevated px-2.5 py-1 rounded-xl transition-colors border border-border/50"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Close Video</span>
+              </button>
+            </div>
           </div>
 
           {/* 16:9 Cinema Screen */}
-          <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black shadow-2xl border border-white/10 max-h-[65vh]">
+          <div
+            ref={videoContainerRef}
+            className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black shadow-2xl border border-white/10 max-h-[65vh]"
+          >
             <iframe
               ref={iframeRef}
               src={`https://www.youtube-nocookie.com/embed/${activeVideoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&rel=0&iv_load_policy=3`}
               title={activeVideoTitle}
               className="w-full h-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
             />
           </div>

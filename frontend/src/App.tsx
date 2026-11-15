@@ -29,7 +29,24 @@ export const App: React.FC = () => {
   useEffect(() => {
     initTheme();
     const cleanupWs = initWebSocket();
-    return () => cleanupWs();
+
+    // Global F11 key shortcut for full-screen toggle
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F11') {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen?.().catch(() => {});
+        } else {
+          document.exitFullscreen?.().catch(() => {});
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      cleanupWs();
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [initTheme, initWebSocket]);
 
   const handleSearchSubmit = (query: string) => {
