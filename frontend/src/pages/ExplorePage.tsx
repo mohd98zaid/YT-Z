@@ -259,13 +259,36 @@ export const ExplorePage: React.FC = () => {
               {selectedMoodPlaylists.map((pl: any, idx: number) => (
                 <div
                   key={idx}
-                  className="bg-surface border border-border rounded-2xl p-3.5 flex flex-col justify-between hover:border-primary/40 hover:-translate-y-1 transition-all shadow-md group"
+                  onClick={async () => {
+                    const id = pl.id || pl.browseId || pl.playlistId;
+                    if (id) {
+                      try {
+                        let data = await api.getPlaylist(id);
+                        if (!data || !data.tracks || data.tracks.length === 0) {
+                          data = await api.getAlbum(id);
+                        }
+                        if (data && data.tracks && data.tracks.length > 0) {
+                          playTrack(data.tracks[0], data.tracks);
+                        }
+                      } catch (err) {
+                        console.error('Failed to play mood playlist', err);
+                      }
+                    }
+                  }}
+                  className="bg-surface border border-border rounded-2xl p-3.5 flex flex-col justify-between hover:border-primary/40 hover:-translate-y-1 transition-all shadow-md group cursor-pointer"
                 >
-                  <img
-                    src={pl.thumbnail}
-                    alt=""
-                    className="aspect-square w-full rounded-xl object-cover mb-3"
-                  />
+                  <div className="relative aspect-square w-full rounded-xl overflow-hidden mb-3">
+                    <img
+                      src={pl.thumbnail}
+                      alt=""
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white shadow-lg">
+                        <Play className="w-5 h-5 fill-current ml-0.5" />
+                      </div>
+                    </div>
+                  </div>
                   <div>
                     <h4 className="font-semibold text-sm text-foreground truncate group-hover:text-primary transition-colors">
                       {pl.title}

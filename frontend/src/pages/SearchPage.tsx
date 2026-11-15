@@ -56,7 +56,16 @@ export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => 
       const id = item.id || item.browseId;
       if (id) {
         try {
-          const data = item.resultType === 'playlist' ? await api.getPlaylist(id) : await api.getAlbum(id);
+          const isPl =
+            item.resultType === 'playlist' ||
+            id.startsWith('RDCL') ||
+            id.startsWith('PL') ||
+            id.startsWith('VL') ||
+            id.startsWith('RD');
+          let data = isPl ? await api.getPlaylist(id) : await api.getAlbum(id);
+          if (!data || !data.tracks || data.tracks.length === 0) {
+            data = isPl ? await api.getAlbum(id) : await api.getPlaylist(id);
+          }
           if (data && data.tracks && data.tracks.length > 0) {
             playTrack(data.tracks[0], data.tracks);
           }

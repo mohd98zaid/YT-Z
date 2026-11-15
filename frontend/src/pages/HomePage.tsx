@@ -85,7 +85,16 @@ export const HomePage: React.FC = () => {
                     } else if (item.id || item.browseId) {
                       const id = item.id || item.browseId;
                       try {
-                        const data = item.type === 'playlist' ? await api.getPlaylist(id) : await api.getAlbum(id);
+                        const isPl =
+                          item.type === 'playlist' ||
+                          id.startsWith('RDCL') ||
+                          id.startsWith('PL') ||
+                          id.startsWith('VL') ||
+                          id.startsWith('RD');
+                        let data = isPl ? await api.getPlaylist(id) : await api.getAlbum(id);
+                        if (!data || !data.tracks || data.tracks.length === 0) {
+                          data = isPl ? await api.getAlbum(id) : await api.getPlaylist(id);
+                        }
                         if (data && data.tracks && data.tracks.length > 0) {
                           playTrack(data.tracks[0], data.tracks);
                         }

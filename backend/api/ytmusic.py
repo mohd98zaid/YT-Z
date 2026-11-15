@@ -111,14 +111,21 @@ class YTMusicService:
                         items.append(self._normalize_track(item))
                     else:
                         # Playlist or Album item in home
-                        browse_id = item.get("browseId") or item.get("playlistId")
+                        browse_id = item.get("browseId") or item.get("playlistId") or ""
+                        is_playlist = (
+                            browse_id.startswith("RDCL") or
+                            browse_id.startswith("PL") or
+                            browse_id.startswith("VL") or
+                            browse_id.startswith("RD") or
+                            "playlist" in str(browse_id).lower()
+                        )
                         items.append({
                             "id": browse_id,
                             "browseId": browse_id,
                             "title": item.get("title", ""),
                             "subtitle": item.get("description") or (", ".join([a.get("name", "") for a in item.get("artists", []) if isinstance(a, dict)]) if item.get("artists") else ""),
                             "thumbnail": self._normalize_thumbnail(item.get("thumbnails")),
-                            "type": "playlist" if "playlist" in str(browse_id).lower() or "vl" in str(browse_id).lower() else "album"
+                            "type": "playlist" if is_playlist else "album"
                         })
                 if items:
                     sections.append({
@@ -308,12 +315,15 @@ class YTMusicService:
             return {}
 
     def get_album(self, browse_id: str) -> Dict[str, Any]:
-        """Fetch album details and track list"""
-        if not self.yt:
+        """Fetch album details and track list with auto-fallback to playlist"""
+        if not self.yt or not browse_id:
             return {}
+        # If browse_id is actually a playlist (RDCL, PL, VL, RD)
+        if any(browse_id.startswith(p) for p in ("RDCL", "PL", "VL", "RD")):
+            return self.get_playlist(browse_id)
         try:
             album_data = self.yt.get_album(browse_id)
-            tracks = [self._normalize_track(t) for t in album_data.get("tracks", [])]
+            tracks = [self._normalize_track(t) for t in album_data.get("tracks", []) if t.get("videoId") or t.get("id")]
             return {
                 "id": browse_id,
                 "title": album_data.get("title", ""),
@@ -326,16 +336,23 @@ class YTMusicService:
                 "tracks": tracks
             }
         except Exception as e:
+            logger.debug(f"get_album failed for {browse_id}, trying get_playlist: {e}")
+            pl_result = self.get_playlist(browse_id)
+            if pl_result and pl_result.get("tracks"):
+                return pl_result
             logger.error(f"Error fetching album {browse_id}: {e}")
             return {}
 
     def get_playlist(self, playlist_id: str) -> Dict[str, Any]:
-        """Fetch playlist details and track list"""
-        if not self.yt:
+        """Fetch playlist details and track list with auto-fallback to album"""
+        if not self.yt or not playlist_id:
             return {}
+        # If playlist_id is actually an album browse ID (MPREb_)
+        if playlist_id.startswith("MPREb_"):
+            return self.get_album(playlist_id)
         try:
             pl_data = self.yt.get_playlist(playlist_id)
-            tracks = [self._normalize_track(t) for t in pl_data.get("tracks", [])]
+            tracks = [self._normalize_track(t) for t in pl_data.get("tracks", []) if t.get("videoId") or t.get("id")]
             return {
                 "id": playlist_id,
                 "title": pl_data.get("title", ""),
@@ -346,6 +363,10 @@ class YTMusicService:
                 "tracks": tracks
             }
         except Exception as e:
+            logger.debug(f"get_playlist failed for {playlist_id}, trying get_album: {e}")
+            album_result = self.get_album(playlist_id)
+            if album_result and album_result.get("tracks"):
+                return album_result
             logger.error(f"Error fetching playlist {playlist_id}: {e}")
             return {}
 
