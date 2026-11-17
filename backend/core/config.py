@@ -13,6 +13,8 @@ logger = logging.getLogger("YTZ.Config")
 DEFAULT_CONFIG: Dict[str, Any] = {
     "theme": "apple-music",
     "theme_mode": "dark",
+    "default_country": "IN",
+    "default_language": "hi",
     "download_dir": str(Path.home() / "Music" / "YT-Z Downloads"),
     "default_audio_format": "mp3",
     "default_audio_quality": "320",

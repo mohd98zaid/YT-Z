@@ -1,6 +1,5 @@
 """
 Pluggable Module Sources & Extensions Manager for YT-Z.
-Inspired by BitChord's pluggable module sources architecture and ytm-rs features:
 - Audio Sources: Hi-Res Lossless FLAC / ALAC modules with YouTube Music fallback.
 - Lyrics Providers: Multi-source engines (BetterLyrics syllable-level, LRCLIB, Genius, Musixmatch).
 - Enhancements: SponsorBlock auto-skipping, Skip Silence, Volume Normalization.
@@ -53,14 +52,14 @@ DEFAULT_PLUGINS = [
         "is_builtin": True
     },
     {
-        "id": "flac-lossless",
-        "name": "Hi-Res FLAC Lossless Module",
+        "id": "bitchord-lossless",
+        "name": "BitChord Lossless Audio Engine",
         "type": "audio_source",
-        "description": "Streams bit-perfect 16-bit/24-bit 48kHz+ FLAC audio with automatic fallback to YouTube 256k Opus.",
-        "endpoint": "internal://bitchord/lossless-engine",
-        "enabled": True,
-        "status": "active",
-        "latency_ms": 1,
+        "description": "BitChord / FreeHiRes FLAC audio source addon. Resolves bit-perfect 16-bit/24-bit FLAC audio when available, falling back to YouTube Music Opus.",
+        "endpoint": "https://api.bitchord.audio/v1",
+        "enabled": False,
+        "status": "standby",
+        "latency_ms": 0,
         "icon": "Disc",
         "is_builtin": True
     },
@@ -133,10 +132,10 @@ class PluginService:
 
     def _init_defaults(self):
         existing = {p["id"]: p for p in self.db.get_all_plugins()}
+        if "flac-lossless" in existing:
+            self.db.delete_plugin("flac-lossless")
         for p in DEFAULT_PLUGINS:
             if p["id"] not in existing:
-                self.db.upsert_plugin(p)
-            elif p["id"] == "flac-lossless" and existing[p["id"]].get("endpoint") == "https://api.deezer.com":
                 self.db.upsert_plugin(p)
         logger.info("Synchronized pluggable module sources.")
 

@@ -5,20 +5,19 @@ import {
   Download,
   ExternalLink,
   Flame,
-  Film,
-  Sparkles,
   Maximize2,
   ListPlus,
-  Tv,
-  Check,
+  RotateCcw,
   Clipboard,
   X,
+  PictureInPicture2,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Track } from '../types';
 import { usePlayerStore } from '../stores/usePlayerStore';
 import { useDownloadStore } from '../stores/useDownloadStore';
 import { useNavigationStore } from '../stores/useNavigationStore';
+import { useVideoStore } from '../stores/useVideoStore';
 
 // Authentic YouTube Play Icon
 const YouTubeIcon: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
@@ -27,6 +26,7 @@ const YouTubeIcon: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }
   </svg>
 );
 
+// Helper to extract YouTube video ID from various link formats
 function extractYouTubeId(url: string): string | null {
   if (!url) return null;
   const trimmed = url.trim();
@@ -42,131 +42,121 @@ function extractYouTubeId(url: string): string | null {
 export const YouTubePage: React.FC = () => {
   const [urlInput, setUrlInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
-  const [activeVideoTitle, setActiveVideoTitle] = useState<string>('YouTube Video');
-  const [activeVideoAuthor, setActiveVideoAuthor] = useState<string>('');
   const [trendingVideos, setTrendingVideos] = useState<Track[]>([]);
   const [searchResults, setSearchResults] = useState<Track[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [copiedToast, setCopiedToast] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const videoContainerRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // Monitor fullscreen state
-  useEffect(() => {
-    const onFsChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, []);
+  const {
+    activeVideo,
+    isPiP,
+    isFullscreen,
+    playVideo,
+    closeVideo,
+    togglePiP,
+    setPiP,
+    setIsFullscreen,
+    reloadVideo,
+    restoreCinema,
+  } = useVideoStore();
 
-  const handleToggleFullscreen = () => {
-    const el = videoContainerRef.current || iframeRef.current;
-    if (!el) return;
-    if (!document.fullscreenElement) {
-      if (el.requestFullscreen) {
-        el.requestFullscreen().catch(() => {});
-      } else if ((el as any).webkitRequestFullscreen) {
-        (el as any).webkitRequestFullscreen();
-      }
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
-      }
-    }
-  };
-
-  const { isPlaying, pause, setActiveVideoSource, playTrack } = usePlayerStore();
+  const { playTrack } = usePlayerStore();
   const { queueDownload } = useDownloadStore();
   const youtubeSelectedVideo = useNavigationStore((s) => s.youtubeSelectedVideo);
 
-  // 1. When video becomes active in YouTube Theater, immediately pause music playback
+  // Picture-in-Picture on scroll: detect when Cinema Screen scrolls out of view
   useEffect(() => {
-    if (activeVideoId) {
-      pause();
-      setActiveVideoSource('youtube_theater');
-    } else {
-      if (usePlayerStore.getState().activeVideoSource === 'youtube_theater') {
-        setActiveVideoSource(null);
-      }
+    if (!activeVideo) {
+      return;
     }
-  }, [activeVideoId, pause, setActiveVideoSource]);
 
-  // Clean up active video source on unmount
-  useEffect(() => {
+    const scrollContainer = sentinelRef.current?.closest('main') || window;
+
+    const handleScroll = () => {
+      if (!sentinelRef.current) return;
+      const rect = sentinelRef.current.getBoundingClientRect();
+      // When the cinema screen scrolls past header into top view
+      if (rect.bottom < 80) {
+        setPiP(true);
+      } else if (rect.top >= 40) {
+        setPiP(false);
+      }
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
-      if (usePlayerStore.getState().activeVideoSource === 'youtube_theater') {
-        usePlayerStore.getState().setActiveVideoSource(null);
-      }
+      scrollContainer.removeEventListener('scroll', handleScroll);
     };
-  }, []);
+  }, [activeVideo, setPiP]);
 
-  // 2. If music starts playing anywhere, pause the active YouTube video iframe
-  useEffect(() => {
-    if (isPlaying && activeVideoId && iframeRef.current?.contentWindow) {
-      try {
-        iframeRef.current.contentWindow.postMessage(
-          JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
-          '*'
-        );
-      } catch (err) {
-        console.debug('Failed to pause iframe video', err);
-      }
+  const handleToggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+      setIsFullscreen(false);
     }
-  }, [isPlaying, activeVideoId]);
-
-  // 3. Listen to YouTube embed events (when user clicks play inside embed iframe)
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      try {
-        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        if (data && data.event === 'infoDelivery' && data.info) {
-          // playerState 1 = PLAYING
-          if (data.info.playerState === 1) {
-            usePlayerStore.getState().pause();
-            usePlayerStore.getState().setActiveVideoSource('youtube_theater');
-          }
-        }
-      } catch {}
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  };
 
   // Auto-play video redirected from other components
   useEffect(() => {
     if (youtubeSelectedVideo && youtubeSelectedVideo.id) {
-      setActiveVideoId(youtubeSelectedVideo.id);
-      setActiveVideoTitle(youtubeSelectedVideo.title);
-      setActiveVideoAuthor(youtubeSelectedVideo.artist || 'YouTube');
+      playVideo({
+        id: youtubeSelectedVideo.id,
+        title: youtubeSelectedVideo.title,
+        artist: youtubeSelectedVideo.artist || 'YouTube',
+      });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [youtubeSelectedVideo]);
+  }, [youtubeSelectedVideo, playVideo]);
 
-  // Load Trending YouTube Videos on mount (no automatic autoplay)
-  useEffect(() => {
+  const [trendingCategory, setTrendingCategory] = useState<'IN' | 'bollywood' | 'punjabi' | 'US'>('IN');
+
+  // Load Trending YouTube Videos (Default: India / Hindi)
+  const loadTrending = async (category: 'IN' | 'bollywood' | 'punjabi' | 'US' = 'IN') => {
     setLoading(true);
-    api.getCharts()
-      .then((charts) => {
+    setTrendingCategory(category);
+    try {
+      if (category === 'IN') {
+        const charts = await api.getCharts('IN');
         if (charts && charts.videos && charts.videos.length > 0) {
           setTrendingVideos(charts.videos);
         }
-      })
-      .catch((err) => console.error('Failed to load trending videos', err))
-      .finally(() => setLoading(false));
+      } else if (category === 'US') {
+        const charts = await api.getCharts('US');
+        if (charts && charts.videos && charts.videos.length > 0) {
+          setTrendingVideos(charts.videos);
+        }
+      } else if (category === 'bollywood') {
+        const results = await api.searchYouTubeVideos('Hindi Bollywood official video new song', 16);
+        setTrendingVideos(results || []);
+      } else if (category === 'punjabi') {
+        const results = await api.searchYouTubeVideos('Punjabi official video new song', 16);
+        setTrendingVideos(results || []);
+      }
+    } catch (err) {
+      console.error('Failed to load trending videos', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTrending('IN');
   }, []);
 
   const handlePlayUrl = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const id = extractYouTubeId(urlInput);
     if (id) {
-      setActiveVideoId(id);
-      setActiveVideoTitle(`YouTube Video (${id})`);
-      setActiveVideoAuthor('YouTube');
+      playVideo({
+        id,
+        title: `YouTube Video (${id})`,
+        artist: 'YouTube',
+      });
       setUrlInput('');
     } else {
       alert('Please enter a valid YouTube video URL or 11-character video ID.');
@@ -180,9 +170,11 @@ export const YouTubePage: React.FC = () => {
         setUrlInput(text);
         const id = extractYouTubeId(text);
         if (id) {
-          setActiveVideoId(id);
-          setActiveVideoTitle(`YouTube Video (${id})`);
-          setActiveVideoAuthor('YouTube');
+          playVideo({
+            id,
+            title: `YouTube Video (${id})`,
+            artist: 'YouTube',
+          });
           setCopiedToast(true);
           setTimeout(() => setCopiedToast(false), 2000);
         }
@@ -208,9 +200,12 @@ export const YouTubePage: React.FC = () => {
 
   const handleSelectVideo = (video: Track) => {
     const id = video.videoId || video.id;
-    setActiveVideoId(id);
-    setActiveVideoTitle(video.title);
-    setActiveVideoAuthor(video.artist || 'YouTube');
+    playVideo({
+      id,
+      title: video.title,
+      artist: video.artist || 'YouTube',
+      thumbnail: video.thumbnail,
+    });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -225,6 +220,21 @@ export const YouTubePage: React.FC = () => {
     });
   };
 
+  const handleListenAsAudio = () => {
+    if (!activeVideo) return;
+    const cur = activeVideo;
+    closeVideo();
+    playTrack({
+      id: cur.id,
+      videoId: cur.id,
+      title: cur.title,
+      artist: cur.artist,
+      thumbnail: cur.thumbnail || `https://i.ytimg.com/vi/${cur.id}/hqdefault.jpg`,
+      duration: '0:00',
+      durationSeconds: 0,
+    });
+  };
+
   return (
     <div className="p-8 space-y-8 max-w-7xl mx-auto pb-28">
       {/* Header Banner */}
@@ -234,11 +244,16 @@ export const YouTubePage: React.FC = () => {
             <YouTubeIcon className="w-7 h-7" />
           </div>
           <div>
-            <h1 className="text-3xl font-black text-foreground tracking-tight flex items-center gap-2">
-              <span>YouTube Video Theater</span>
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-black tracking-tight text-foreground">
+                YouTube Videos & Music
+              </h1>
+              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-600/20 text-red-500 border border-red-500/30 uppercase">
+                4K Cinema
+              </span>
+            </div>
             <p className="text-xs text-foreground-muted mt-0.5">
-              Play any YouTube video directly in HD, watch trending videos, or paste any video link.
+              Watch ad-free videos, float in Sidebar PiP, or seamlessly convert to audio & download
             </p>
           </div>
         </div>
@@ -273,7 +288,7 @@ export const YouTubePage: React.FC = () => {
       </div>
 
       {/* Main Theater Player Section (only when a video is selected) */}
-      {activeVideoId ? (
+      {activeVideo ? (
         <div className="bg-surface border border-border rounded-3xl p-5 shadow-2xl space-y-4 animate-fadeIn relative">
           <div className="flex items-center justify-between pb-1">
             <span className="text-xs font-bold text-red-500 flex items-center gap-1.5 uppercase tracking-wider">
@@ -281,27 +296,44 @@ export const YouTubePage: React.FC = () => {
               Now Playing
             </span>
             <div className="flex items-center gap-2">
+              {/* Picture-in-Picture Toggle Button */}
               <button
+                type="button"
+                onClick={togglePiP}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-xl transition-all border ${
+                  isPiP
+                    ? 'bg-red-600/20 text-red-500 border-red-500/40 shadow-sm shadow-red-500/20'
+                    : 'text-foreground-muted hover:text-foreground hover:bg-surface-elevated border-border/50'
+                }`}
+                title={isPiP ? 'Restore full cinema screen' : 'Dock video into Sidebar PiP'}
+              >
+                <PictureInPicture2 className="w-3.5 h-3.5 text-red-500" />
+                <span>{isPiP ? 'Exit PiP' : 'Sidebar PiP'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleToggleFullscreen}
-                className="flex items-center gap-1.5 text-xs font-semibold text-foreground-muted hover:text-foreground hover:bg-surface-elevated px-3 py-1 rounded-xl transition-colors border border-border/50"
+                className="flex items-center gap-1.5 text-xs font-semibold text-foreground-muted hover:text-foreground hover:bg-surface-elevated px-2.5 py-1 rounded-xl transition-colors border border-border/50"
                 title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'Enter Fullscreen (F)'}
               >
                 <Maximize2 className="w-3.5 h-3.5 text-red-500" />
                 <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
               </button>
+
               <button
-                onClick={() => {
-                  if (iframeRef.current?.contentWindow) {
-                    try {
-                      iframeRef.current.contentWindow.postMessage(
-                        JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
-                        '*'
-                      );
-                    } catch {}
-                  }
-                  setActiveVideoId(null);
-                  setActiveVideoSource(null);
-                }}
+                type="button"
+                onClick={reloadVideo}
+                className="flex items-center gap-1.5 text-xs font-semibold text-foreground-muted hover:text-foreground hover:bg-surface-elevated px-2.5 py-1 rounded-xl transition-colors border border-border/50"
+                title="Reload / Retry Video Player"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-foreground-muted" />
+                <span>Retry</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={closeVideo}
                 className="flex items-center gap-1 text-xs font-semibold text-foreground-muted hover:text-foreground hover:bg-surface-elevated px-2.5 py-1 rounded-xl transition-colors border border-border/50"
               >
                 <X className="w-3.5 h-3.5" />
@@ -310,55 +342,46 @@ export const YouTubePage: React.FC = () => {
             </div>
           </div>
 
-          {/* 16:9 Cinema Screen */}
+          {/* Sentinel & Cinema Screen Anchor for Persistent Video Player */}
           <div
-            ref={videoContainerRef}
-            className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black shadow-2xl border border-white/10 max-h-[65vh]"
+            ref={sentinelRef}
+            id="youtube-cinema-anchor"
+            className="relative w-full aspect-video rounded-2xl max-h-[65vh] bg-black/40 overflow-hidden"
           >
-            <iframe
-              ref={iframeRef}
-              src={`https://www.youtube-nocookie.com/embed/${activeVideoId}?autoplay=1&enablejsapi=1&controls=1&modestbranding=1&rel=0&iv_load_policy=3`}
-              title={activeVideoTitle}
-              className="w-full h-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-              allowFullScreen
-            />
+            {/* Animated Placeholder displayed in page layout when video docks into Sidebar PiP */}
+            {isPiP && (
+              <div
+                onClick={restoreCinema}
+                className="w-full h-full rounded-2xl border-2 border-dashed border-red-500/30 bg-surface-elevated/40 hover:bg-surface-elevated/70 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer group p-6 shadow-inner animate-fadeIn select-none"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-red-600/15 border border-red-500/30 text-red-500 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                  <PictureInPicture2 className="w-6 h-6 animate-pulse" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-bold text-foreground flex items-center justify-center gap-2">
+                    <span>Video Playing in Sidebar PiP</span>
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                  </p>
+                  <p className="text-xs text-foreground-muted mt-1">
+                    Click anywhere here or in the left sidebar to restore full cinema screen
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Under-Video Details & Quick Actions Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
             <div className="min-w-0">
-              <h2 className="text-xl font-bold text-foreground truncate">{activeVideoTitle}</h2>
-              <p className="text-xs text-foreground-muted truncate mt-0.5">{activeVideoAuthor}</p>
+              <h2 className="text-xl font-bold text-foreground truncate">{activeVideo.title}</h2>
+              <p className="text-xs text-foreground-muted truncate mt-0.5">{activeVideo.artist}</p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {/* Play Audio in Global Player (seamless transition from video to audio) */}
+              {/* Play Audio in Global Player */}
               <button
-                onClick={() => {
-                  if (iframeRef.current?.contentWindow) {
-                    try {
-                      iframeRef.current.contentWindow.postMessage(
-                        JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
-                        '*'
-                      );
-                    } catch {}
-                  }
-                  const vId = activeVideoId;
-                  const vTitle = activeVideoTitle;
-                  const vAuthor = activeVideoAuthor;
-                  setActiveVideoId(null);
-                  setActiveVideoSource(null);
-                  playTrack({
-                    id: vId,
-                    videoId: vId,
-                    title: vTitle,
-                    artist: vAuthor,
-                    thumbnail: `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`,
-                    duration: '0:00',
-                    durationSeconds: 0,
-                  });
-                }}
+                type="button"
+                onClick={handleListenAsAudio}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surface-elevated hover:bg-border/60 text-xs font-bold text-foreground transition-all hover:scale-105 active:scale-95"
               >
                 <ListPlus className="w-3.5 h-3.5 text-primary" />
@@ -367,8 +390,9 @@ export const YouTubePage: React.FC = () => {
 
               {/* Download 4K Video */}
               <button
+                type="button"
                 onClick={() =>
-                  handleDownloadVideo(activeVideoId, activeVideoTitle, activeVideoAuthor, false)
+                  handleDownloadVideo(activeVideo.id, activeVideo.title, activeVideo.artist, false)
                 }
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surface-elevated hover:bg-border/60 text-xs font-bold text-foreground transition-all hover:scale-105 active:scale-95"
               >
@@ -378,14 +402,27 @@ export const YouTubePage: React.FC = () => {
 
               {/* Download 320k MP3 */}
               <button
+                type="button"
                 onClick={() =>
-                  handleDownloadVideo(activeVideoId, activeVideoTitle, activeVideoAuthor, true)
+                  handleDownloadVideo(activeVideo.id, activeVideo.title, activeVideo.artist, true)
                 }
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surface-elevated hover:bg-border/60 text-xs font-bold text-foreground transition-all hover:scale-105 active:scale-95"
               >
                 <Download className="w-3.5 h-3.5 text-pink-400" />
                 <span>Download MP3</span>
               </button>
+
+              {/* Watch on YouTube (Direct official link) */}
+              <a
+                href={`https://www.youtube.com/watch?v=${activeVideo.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surface-elevated hover:bg-border/60 text-xs font-bold text-foreground-muted hover:text-foreground transition-all hover:scale-105 active:scale-95"
+                title="Open in YouTube"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-red-500" />
+                <span>Watch on YouTube</span>
+              </a>
             </div>
           </div>
         </div>
@@ -477,11 +514,38 @@ export const YouTubePage: React.FC = () => {
         )}
       </div>
 
-      {/* Trending YouTube Videos Section */}
+      {/* Trending YouTube Videos Section (India / Hindi default) */}
       <div className="space-y-4 pt-2">
-        <div className="flex items-center gap-2">
-          <Flame className="w-5 h-5 text-red-500" />
-          <h3 className="text-xl font-bold text-foreground">Trending YouTube Music Videos</h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Flame className="w-5 h-5 text-red-500" />
+            <h3 className="text-xl font-bold text-foreground">Trending YouTube Videos</h3>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-600/15 text-red-500 border border-red-500/30">
+              India (Hindi) Default
+            </span>
+          </div>
+
+          {/* Region & Language Filter Chips */}
+          <div className="flex items-center gap-1 p-1 bg-surface-elevated/70 border border-border/80 rounded-xl overflow-x-auto">
+            {[
+              { id: 'IN', label: '🇮🇳 India (Hindi)' },
+              { id: 'bollywood', label: 'Bollywood & Hindi Pop' },
+              { id: 'punjabi', label: 'Punjabi Hits' },
+              { id: 'US', label: 'Global / US' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => loadTrending(tab.id as any)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all shrink-0 ${
+                  trendingCategory === tab.id
+                    ? 'bg-red-600 text-white shadow-sm shadow-red-600/30'
+                    : 'text-foreground-muted hover:text-foreground'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {loading ? (

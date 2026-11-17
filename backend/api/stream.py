@@ -37,7 +37,7 @@ class StreamResolver:
     ) -> Optional[Dict[str, Any]]:
         """
         Resolve highest quality audio stream for a track.
-        Prioritizes configured Hi-Res Lossless (FLAC/ALAC) add-ons (BitChord architecture),
+        Prioritizes configured Hi-Res Lossless (FLAC/ALAC) add-ons,
         falling back gracefully to YouTube Music Opus.
         """
         now = time.time()
@@ -46,7 +46,7 @@ class StreamResolver:
         if cached and cached.get("expires_at", 0) > now:
             return cached["data"]
 
-        # 1. Check enabled Lossless Module Source Add-ons (BitChord Addon Client)
+        # 1. Check enabled Lossless Module Source Add-ons
         if self.addon_resolver and quality in ("lossless", "high", "auto") and title:
             addon_stream = self.addon_resolver.resolve_lossless_stream(
                 title=title,
@@ -78,46 +78,6 @@ class StreamResolver:
                         "expires_at": now + CACHE_TTL
                     }
                     return result
-                elif addon_stream.get("is_internal"):
-                    # Internal BitChord Lossless Audio Engine
-                    url = f"https://www.youtube.com/watch?v={video_id}"
-                    try:
-                        with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
-                            info = ydl.extract_info(url, download=False)
-                            if info:
-                                stream_url = info.get("url")
-                                formats = info.get("formats", [])
-                                audio_formats = [
-                                    f for f in formats 
-                                    if f.get("acodec") != "none" and (f.get("vcodec") == "none" or not f.get("vcodec"))
-                                ]
-                                if audio_formats:
-                                    best_audio = sorted(audio_formats, key=lambda x: x.get("abr") or 0, reverse=True)[0]
-                                    stream_url = best_audio.get("url") or stream_url
-                                
-                                result = {
-                                    "videoId": video_id,
-                                    "streamUrl": stream_url,
-                                    "title": addon_stream.get("title", title),
-                                    "artist": addon_stream.get("artist", artist),
-                                    "duration": duration or info.get("duration", 0),
-                                    "codec": "flac",
-                                    "format": "FLAC",
-                                    "bitrate": 1411,
-                                    "sampleRate": 44100,
-                                    "bitDepth": 16,
-                                    "isLossless": True,
-                                    "qualityTier": "lossless",
-                                    "source": "addon",
-                                    "addonName": addon_stream.get("addon_name", "BitChord Hi-Res Module"),
-                                }
-                                _STREAM_CACHE[cache_key] = {
-                                    "data": result,
-                                    "expires_at": now + CACHE_TTL
-                                }
-                                return result
-                    except Exception as e:
-                        logger.warning(f"Internal BitChord lossless bridge failed: {e}")
 
         # 2. Fallback to YouTube Music Stream
         url = f"https://www.youtube.com/watch?v={video_id}"

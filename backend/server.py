@@ -144,7 +144,7 @@ async def get_quick_picks(
     return ytmusic_svc.get_quick_picks(refresh=refresh, mood=mood, limit=limit)
 
 @app.get("/api/ytm/charts")
-async def get_ytm_charts(country: str = Query("US")):
+async def get_ytm_charts(country: str = Query("IN")):
     return ytmusic_svc.get_charts(country)
 
 @app.get("/api/ytm/moods")
@@ -219,7 +219,7 @@ def stream_audio_proxy(
 ):
     """
     Audio streaming proxy with HTTP 206 Partial Content Range support.
-    Supports Lossless FLAC/ALAC add-on streams (BitChord architecture) and YouTube Opus.
+    Supports Lossless FLAC/ALAC add-on streams and YouTube Opus.
     """
     stream_info = stream_resolver.resolve_audio(
         video_id,

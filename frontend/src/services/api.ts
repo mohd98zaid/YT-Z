@@ -19,7 +19,7 @@ export const api = {
     fetchJson<Track[]>(
       `${API_BASE}/api/ytm/quick-picks?refresh=${refresh}${mood ? `&mood=${encodeURIComponent(mood)}` : ''}&limit=${limit}`
     ),
-  getCharts: (country = 'US') => fetchJson<any>(`${API_BASE}/api/ytm/charts?country=${country}`),
+  getCharts: (country = 'IN') => fetchJson<any>(`${API_BASE}/api/ytm/charts?country=${country}`),
   getMoodCategories: () => fetchJson<Record<string, any[]>>(`${API_BASE}/api/ytm/moods`),
   getMoodPlaylists: (params: string) => fetchJson<any[]>(`${API_BASE}/api/ytm/moods/playlists?params=${encodeURIComponent(params)}`),
   search: (query: string, filter?: string) => {
@@ -36,7 +36,7 @@ export const api = {
   getPlaylist: (playlistId: string) => fetchJson<any>(`${API_BASE}/api/ytm/playlist/${playlistId}`),
   getRadio: (videoId: string) => fetchJson<Track[]>(`${API_BASE}/api/ytm/radio/${videoId}`),
 
-  // Playback & Stream (BitChord Lossless Addon & YouTube Fallback)
+  // Playback & Stream (Lossless Addon & YouTube Fallback)
   getAudioStream: (videoId: string, title = '', artist = '', duration = 0, quality = 'auto') =>
     fetchJson<{
       streamUrl: string;
@@ -131,7 +131,7 @@ export const api = {
       body: JSON.stringify(updates),
     }),
 
-  // Pluggable Sources & Extensions (BitChord / ytm-rs style)
+  // Pluggable Sources & Extensions
   getPlugins: () => fetchJson<any[]>(`${API_BASE}/api/plugins`),
   togglePlugin: (id: string, enabled: boolean) =>
     fetchJson<any>(`${API_BASE}/api/plugins/${id}/toggle`, {

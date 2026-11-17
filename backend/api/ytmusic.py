@@ -11,11 +11,12 @@ from ytmusicapi import YTMusic
 logger = logging.getLogger("YTZ.YTMusic")
 
 class YTMusicService:
-    def __init__(self):
+    def __init__(self, location: str = "IN", language: str = "en"):
+        self.default_country = location
         self._quick_picks_cache: List[Dict[str, Any]] = []
         try:
-            self.yt = YTMusic()
-            logger.info("Initialized YTMusic anonymous client")
+            self.yt = YTMusic(language=language, location=location)
+            logger.info(f"Initialized YTMusic anonymous client (location={location}, language={language})")
         except Exception as e:
             logger.error(f"Failed to initialize YTMusic client: {e}")
             self.yt = None
@@ -134,7 +135,7 @@ class YTMusicService:
 
             # 3. Add Top Charts songs to broaden variety
             try:
-                charts = self.get_charts(country="US")
+                charts = self.get_charts(country=self.default_country)
                 for s in charts.get("songs", []):
                     vid = s.get("videoId") or s.get("id")
                     if vid and vid not in seen_ids:
@@ -204,7 +205,7 @@ class YTMusicService:
             logger.error(f"Error fetching home feed: {e}")
             return []
 
-    def get_charts(self, country: str = "US") -> Dict[str, Any]:
+    def get_charts(self, country: str = "IN") -> Dict[str, Any]:
         """Fetch Top Charts: Top Songs, Top Videos, Top Artists"""
         if not self.yt:
             return {"songs": [], "videos": [], "artists": []}

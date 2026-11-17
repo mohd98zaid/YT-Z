@@ -1,5 +1,5 @@
 """
-Pluggable Add-on Source Resolver for Hi-Res Lossless Audio (BitChord Architecture).
+Pluggable Add-on Source Resolver for Hi-Res Lossless Audio.
 Interfaces with configured module sources / add-ons to resolve bit-perfect FLAC / ALAC audio streams,
 with seamless fallback to YouTube Music 256k Opus.
 """
@@ -36,9 +36,9 @@ class AddonSourceResolver:
     ) -> Optional[Dict[str, Any]]:
         """
         Queries enabled audio_source add-ons for a bit-perfect Lossless (FLAC) or High (320k) stream.
-        Implements the BitChord Addon client protocol:
+        Implements the Lossless Addon client protocol:
         1. Single-shot /resolve (POST or GET)
-        2. BitChord standard 2-step: GET /search?q=... -> GET /stream?id=...
+        2. Standard 2-step: GET /search?q=... -> GET /stream?id=...
         3. Internal Lossless Engine & Hardware DAC pass-through
         """
         if not title:
@@ -66,43 +66,18 @@ class AddonSourceResolver:
                 continue
 
             headers = {
-                "User-Agent": "BitChord-Android/1.9.1 (YT-Z Lossless Client; Windows x86_64)",
+                "User-Agent": "YT-Z/1.0.0 (Windows x86_64; Lossless Client)",
                 "Accept": "application/json",
             }
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
                 headers["X-Addon-Key"] = api_key
 
-            # -------------------------------------------------------------
-            # Strategy A: Built-in Internal Lossless Audio Engine
-            # -------------------------------------------------------------
-            if endpoint.startswith("internal://") or endpoint.startswith("bitchord://") or endpoint.startswith("local://"):
-                # Check if this is an internal lossless pass-through or high-fidelity simulation
-                # Generates lossless FLAC stream metadata for bit-perfect decoding
-                logger.info(f"Using Internal BitChord Lossless Engine for '{clean_title}'")
-                return {
-                    "source": "addon",
-                    "addon_name": addon_name,
-                    "is_lossless": True,
-                    "codec": "flac",
-                    "format": "FLAC",
-                    "bitrate": 1411,
-                    "sampleRate": 44100,
-                    "bitDepth": 16,
-                    "quality_tier": "lossless",
-                    "streamUrl": f"internal://lossless-dsp/{title}",
-                    "title": clean_title,
-                    "artist": clean_artist or "BitChord Lossless",
-                    "is_internal": True
-                }
-
-            # -------------------------------------------------------------
-            # Strategy B: External HTTP BitChord Add-on Service
-            # -------------------------------------------------------------
+            # Check for genuine external HTTP/HTTPS Lossless Add-on Service
             if endpoint.startswith("http://") or endpoint.startswith("https://"):
                 base_url = endpoint.rstrip("/")
 
-                # 1. Try BitChord 1-shot /resolve (POST or GET)
+                # 1. Try 1-shot /resolve (POST or GET)
                 try:
                     payload = {
                         "title": clean_title,
@@ -125,7 +100,7 @@ class AddonSourceResolver:
                 except Exception as e:
                     logger.debug(f"Addon '{addon_name}' /resolve failed: {e}")
 
-                # 2. Try BitChord Standard 2-Step Protocol: GET /search?q=... -> GET /stream?id=...
+                # 2. Try Standard 2-Step Protocol: GET /search?q=... -> GET /stream?id=...
                 try:
                     search_resp = requests.get(
                         f"{base_url}/search",
