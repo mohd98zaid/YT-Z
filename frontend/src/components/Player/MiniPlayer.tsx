@@ -17,7 +17,7 @@ import {
   Heart,
   Info,
   Video,
-  Moon,
+  Timer,
   Radio,
 } from 'lucide-react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
@@ -41,6 +41,7 @@ export const MiniPlayer: React.FC = () => {
     isQueueOpen,
     lastSkippedNotice,
     audioStats,
+    showMiniPlayerCodecBadge,
     activeVideoSource,
     sleepTimerRemaining,
     sleepTimerStopAfterTrack,
@@ -165,30 +166,32 @@ export const MiniPlayer: React.FC = () => {
           </h4>
           <div className="flex items-center gap-1.5 truncate">
             <p className="text-xs text-foreground-muted truncate">{currentTrack.artist}</p>
-            {audioStats?.isLossless ? (
-              <span
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setExpanded(true);
-                  toggleStatsForNerds();
-                }}
-                className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-black tracking-wider bg-gradient-to-r from-amber-500/20 to-yellow-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.25)] cursor-pointer hover:scale-105 transition-transform"
-                title={`Bit-Perfect Lossless FLAC (${audioStats.bitDepth || 16}-bit/${Math.round((audioStats.sampleRate || 44100)/1000)}kHz)`}
-              >
-                LOSSLESS
-              </span>
-            ) : (
-              <span
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setExpanded(true);
-                  toggleStatsForNerds();
-                }}
-                className="shrink-0 inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-medium bg-surface-elevated text-foreground-subtle border border-border/50 cursor-pointer hover:text-foreground"
-                title="Standard YouTube Music Opus stream (160-256kbps)"
-              >
-                {audioStats?.codec?.toUpperCase() || 'OPUS'}
-              </span>
+            {showMiniPlayerCodecBadge && (
+              audioStats?.isLossless ? (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded(true);
+                    toggleStatsForNerds();
+                  }}
+                  className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-black tracking-wider bg-gradient-to-r from-amber-500/20 to-yellow-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.25)] cursor-pointer hover:scale-105 transition-transform"
+                  title={`Bit-Perfect Lossless FLAC (${audioStats.bitDepth || 16}-bit/${Math.round((audioStats.sampleRate || 44100)/1000)}kHz)`}
+                >
+                  LOSSLESS
+                </span>
+              ) : (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded(true);
+                    toggleStatsForNerds();
+                  }}
+                  className="shrink-0 inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-medium bg-surface-elevated text-foreground-subtle border border-border/50 cursor-pointer hover:text-foreground"
+                  title="Standard YouTube Music Opus stream (160-256kbps)"
+                >
+                  {audioStats?.codec?.toUpperCase() || 'OPUS'}
+                </span>
+              )
             )}
             {activeVideoSource && (
               <span
@@ -349,7 +352,7 @@ export const MiniPlayer: React.FC = () => {
           <ListMusic className="w-4 h-4" />
         </button>
 
-        {/* Start Song Radio (ytm-rs & BitChord) */}
+        {/* Start Song Radio */}
         {!currentTrack.isLocal && (
           <button
             onClick={() => startRadio()}
@@ -360,7 +363,7 @@ export const MiniPlayer: React.FC = () => {
           </button>
         )}
 
-        {/* Sleep Timer (BitChord & ytm-rs) */}
+        {/* Sleep Timer */}
         <button
           onClick={toggleSleepTimer}
           title="Sleep Timer"
@@ -370,7 +373,7 @@ export const MiniPlayer: React.FC = () => {
               : 'text-foreground-muted hover:text-foreground hover:bg-surface-elevated'
           }`}
         >
-          <Moon className="w-4 h-4" />
+          <Timer className="w-4 h-4" />
           {(sleepTimerRemaining !== null || sleepTimerStopAfterTrack) && (
             <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-primary animate-ping" />
           )}

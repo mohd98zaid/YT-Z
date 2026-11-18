@@ -53,6 +53,15 @@ export const api = {
       `${API_BASE}/api/stream/${videoId}?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&duration=${duration}&quality=${quality}`
     ),
   getSkipSegments: (videoId: string) => fetchJson<SponsorBlockSegment[]>(`${API_BASE}/api/stream/${videoId}/segments`),
+  getVideoStreamInfo: (videoId: string) =>
+    fetchJson<{
+      videoId: string;
+      videoUrl: string;
+      title: string;
+      duration: number;
+      resolution: string;
+      audioQuality: string;
+    }>(`${API_BASE}/api/stream/${videoId}/video-info`),
 
   // Lyrics
   getLyrics: (title: string, artist = '', duration = 0) =>
@@ -122,6 +131,32 @@ export const api = {
     }),
   removeFavorite: (videoId: string) => fetchJson<any>(`${API_BASE}/api/favorites/${videoId}`, { method: 'DELETE' }),
 
+  // Search History
+  getSearchHistory: () => fetchJson<string[]>(`${API_BASE}/api/history/searches`),
+  saveSearchQuery: (query: string) =>
+    fetchJson<any>(`${API_BASE}/api/history/searches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    }),
+  deleteSearchQuery: (query?: string) =>
+    fetchJson<any>(`${API_BASE}/api/history/searches${query ? `?query=${encodeURIComponent(query)}` : ''}`, {
+      method: 'DELETE',
+    }),
+
+  // Playback / Listening History
+  getPlaybackHistory: (limit = 50) => fetchJson<Track[]>(`${API_BASE}/api/history/playback?limit=${limit}`),
+  recordPlayback: (track: Track) =>
+    fetchJson<any>(`${API_BASE}/api/history/playback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(track),
+    }),
+  clearPlaybackHistory: (trackId?: string) =>
+    fetchJson<any>(`${API_BASE}/api/history/playback${trackId ? `?track_id=${encodeURIComponent(trackId)}` : ''}`, {
+      method: 'DELETE',
+    }),
+
   // Config
   getConfig: () => fetchJson<any>(`${API_BASE}/api/config`),
   updateConfig: (updates: any) =>
@@ -147,6 +182,49 @@ export const api = {
     }),
   deletePlugin: (id: string) => fetchJson<any>(`${API_BASE}/api/plugins/${id}`, { method: 'DELETE' }),
   testPlugin: (id: string) => fetchJson<any>(`${API_BASE}/api/plugins/${id}/test`, { method: 'POST' }),
+
+  // Custom Playlists
+  getCustomPlaylists: () =>
+    fetchJson<Array<{ id: string; name: string; description: string; thumbnail: string; trackCount: number; created_at: string }>>(
+      `${API_BASE}/api/playlists/custom`
+    ),
+  createCustomPlaylist: (name: string, description = '', thumbnail = '') =>
+    fetchJson<any>(`${API_BASE}/api/playlists/custom`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description, thumbnail }),
+    }),
+  getCustomPlaylist: (id: string) => fetchJson<any>(`${API_BASE}/api/playlists/custom/${id}`),
+  deleteCustomPlaylist: (id: string) => fetchJson<any>(`${API_BASE}/api/playlists/custom/${id}`, { method: 'DELETE' }),
+  addTrackToPlaylist: (playlistId: string, track: Track) =>
+    fetchJson<any>(`${API_BASE}/api/playlists/custom/${playlistId}/tracks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(track),
+    }),
+  removeTrackFromPlaylist: (playlistId: string, trackId: string) =>
+    fetchJson<any>(`${API_BASE}/api/playlists/custom/${playlistId}/tracks/${encodeURIComponent(trackId)}`, {
+      method: 'DELETE',
+    }),
+
+  // ID3 Tag Editor
+  editAudioTags: (payload: { filePath: string; title: string; artist: string; album: string; year?: string; genre?: string }) =>
+    fetchJson<any>(`${API_BASE}/api/library/edit-tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // Storage & Cache
+  getStorageInfo: () =>
+    fetchJson<{
+      cacheSizeBytes: number;
+      cacheSizeMB: number;
+      downloadsSizeBytes: number;
+      downloadsSizeMB: number;
+      downloadsPath: string;
+    }>(`${API_BASE}/api/storage/info`),
+  clearCache: () => fetchJson<any>(`${API_BASE}/api/storage/clear-cache`, { method: 'POST' }),
 
   // WebSocket
   createWebSocket: (onMessage: (data: any) => void) => {

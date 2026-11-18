@@ -77,6 +77,24 @@ def patch_edgechromium_fullscreen():
             except Exception as ex:
                 logger.debug(f"Could not register ContainsFullScreenElementChanged: {ex}")
 
+            # Hook WebResourceRequested to supply legitimate Referer header for YouTube iframe embeds
+            # This completely eliminates YouTube error: "This video is unavailable / Watch on YouTube"
+            try:
+                def on_web_resource_requested(c_sender, c_args):
+                    try:
+                        uri = str(c_args.Request.Uri)
+                        if "youtube.com" in uri or "googlevideo.com" in uri:
+                            c_args.Request.Headers.SetHeader("Referer", "https://www.youtube.com/")
+                    except Exception:
+                        pass
+
+                sender.CoreWebView2.AddWebResourceRequestedFilter("*youtube.com*", ec.CoreWebView2WebResourceContext.All)
+                sender.CoreWebView2.AddWebResourceRequestedFilter("*googlevideo.com*", ec.CoreWebView2WebResourceContext.All)
+                sender.CoreWebView2.WebResourceRequested += on_web_resource_requested
+                logger.info("Successfully registered WebView2 Referer override for YouTube player playback")
+            except Exception as ex:
+                logger.debug(f"Could not register WebResourceRequested filter: {ex}")
+
         ec.EdgeChrome.on_webview_ready = hooked_on_webview_ready
     except Exception as e:
         logger.debug(f"EdgeChromium patch note: {e}")
@@ -84,7 +102,7 @@ def patch_edgechromium_fullscreen():
 def main():
     print("=" * 65)
     print("           YT-Z: Ultimate YouTube Music & Downloader")
-    print("       Combining ytm-rs + BitChord + StreamFlow Pro Engine")
+    print("             High-Fidelity Audio & 4K Engine")
     print("=" * 65)
 
     # 1. Check if backend is already running

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Moon, Clock, Check, X, Sliders } from 'lucide-react';
+import { Timer, Clock, Check, X, Sliders } from 'lucide-react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 
 export const SleepTimerModal: React.FC = () => {
@@ -41,7 +41,7 @@ export const SleepTimerModal: React.FC = () => {
         <div className="flex items-center justify-between pb-3 border-b border-border/50">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary">
-              <Moon className="w-4 h-4" />
+              <Timer className="w-4 h-4" />
             </div>
             <div>
               <h3 className="font-bold text-base text-foreground">Sleep Timer</h3>

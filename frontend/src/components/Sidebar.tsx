@@ -13,6 +13,7 @@ import {
   Video,
 } from 'lucide-react';
 import { useDownloadStore } from '../stores/useDownloadStore';
+import { useVideoStore } from '../stores/useVideoStore';
 
 export type TabType =
   | 'home'
@@ -31,6 +32,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
+  const { activeVideo, isPiP } = useVideoStore();
   const queue = useDownloadStore((s) => s.queue);
   const activeDownloadsCount = queue.filter(
     (item) => item.status === 'downloading' || item.status === 'pending' || item.status === 'processing'
@@ -54,9 +56,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       <div>
         <div className="p-6 pb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20">
-              <Radio className="w-5 h-5 text-white animate-pulse" />
-            </div>
+            <img
+              src="/app-icon.webp"
+              alt="YT-Z Logo"
+              className="w-10 h-10 rounded-xl object-cover shadow-lg shadow-primary/25 border border-white/10"
+            />
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-extrabold text-xl tracking-tight text-foreground font-sans">
@@ -107,6 +111,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         </nav>
       </div>
 
+      {/* Docked PiP Video Slot in Sidebar */}
+      <div className="px-3 py-2 shrink-0">
+        <div
+          id="sidebar-pip-anchor"
+          className={`w-full transition-all duration-300 rounded-2xl ${
+            activeVideo && (isPiP || activeTab !== 'youtube')
+              ? 'aspect-video bg-black/40 border border-white/10 shadow-lg'
+              : 'h-0 opacity-0 overflow-hidden'
+          }`}
+        />
+      </div>
+
       {/* Footer Info */}
       <div className="p-4 border-t border-border/50 text-[11px] text-foreground-subtle space-y-2">
         <div className="flex items-center justify-between">
@@ -120,7 +136,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         </div>
         <div className="flex items-center gap-1 text-[10px] text-foreground-muted">
           <Sparkles className="w-3 h-3 text-primary" />
-          <span>ytm-rs · BitChord · StreamFlow</span>
+          <span>High-Fidelity Audio & 4K Engine</span>
         </div>
       </div>
     </aside>

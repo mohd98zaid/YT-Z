@@ -68,8 +68,8 @@ export const HomePage: React.FC = () => {
   return (
     <div className="p-8 space-y-10 max-w-7xl mx-auto pb-28">
       {/* Hero Welcome Banner */}
-      <div className="relative rounded-3xl overflow-hidden p-8 border border-border bg-gradient-to-r from-surface-elevated via-surface to-surface-elevated/70 shadow-2xl">
-        <div className="relative z-10 max-w-xl space-y-3">
+      <div className="relative rounded-3xl overflow-hidden p-8 border border-border bg-gradient-to-r from-surface-elevated via-surface to-surface-elevated/70 shadow-2xl flex items-center justify-between">
+        <div className="relative z-1 max-w-xl space-y-3">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/20 text-primary text-xs font-extrabold border border-primary/30">
             <Sparkles className="w-3.5 h-3.5" />
             <span>YT-Z STREAMING & DOWNLOADER</span>
@@ -81,6 +81,17 @@ export const HomePage: React.FC = () => {
             Uncapped direct streaming, Apple-style word-synced lyrics, 30+ visual themes,
             and industrial-grade 4K & 320k MP3 concurrent downloading.
           </p>
+        </div>
+
+        <div className="hidden md:flex relative z-1 shrink-0 mr-4">
+          <div className="relative group">
+            <div className="absolute inset-0 bg-primary/30 rounded-3xl blur-2xl group-hover:blur-3xl transition-all" />
+            <img
+              src="/app-icon.webp"
+              alt="YT-Z Logo"
+              className="relative w-28 h-28 lg:w-32 lg:h-32 rounded-3xl object-cover shadow-2xl border border-white/15 ring-1 ring-primary/30 transform group-hover:scale-105 transition-transform duration-300"
+            />
+          </div>
         </div>
         <div className="absolute -right-8 -bottom-8 w-64 h-64 bg-primary/20 rounded-full filter blur-3xl pointer-events-none" />
       </div>

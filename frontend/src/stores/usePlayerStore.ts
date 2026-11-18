@@ -49,7 +49,7 @@ interface PlayerState {
   lyrics: LyricsResponse | null;
   isLyricsLoading: boolean;
 
-  // Hi-Res Lossless Audio (BitChord Addon System)
+  // Hi-Res Lossless Audio
   audioQuality: 'lossless' | 'high' | 'auto';
   setAudioQuality: (quality: 'lossless' | 'high' | 'auto') => void;
 
@@ -67,7 +67,7 @@ interface PlayerState {
   showStatsForNerds: boolean;
   audioStats: AudioStats | null;
 
-  // Sleep Timer & Audio Tweaks (BitChord & ytm-rs features)
+  // Sleep Timer & Audio Tweaks
   sleepTimerMinutes: number | null;
   sleepTimerRemaining: number | null;
   sleepTimerStopAfterTrack: boolean;
@@ -79,7 +79,26 @@ interface PlayerState {
   activeVideoSource: string | null;
   setActiveVideoSource: (source: string | null) => void;
   pause: () => void;
+  pauseAudio: () => void;
   play: () => void;
+
+  // Lyrics Preferences
+  lyricsEnabled: boolean;
+  setLyricsEnabled: (enabled: boolean) => void;
+  lyricsLayoutMode: 'split' | 'fullscreen' | 'off';
+  setLyricsLayoutMode: (mode: 'split' | 'fullscreen' | 'off') => void;
+
+  // Stats for Nerds & Audiophile Display Preferences
+  enableStatsForNerds: boolean;
+  setEnableStatsForNerds: (enabled: boolean) => void;
+  showAudiophileSpecs: boolean;
+  setShowAudiophileSpecs: (enabled: boolean) => void;
+  showAudioQualityBadge: boolean;
+  setShowAudioQualityBadge: (enabled: boolean) => void;
+  showAudioPipelineCard: boolean;
+  setShowAudioPipelineCard: (enabled: boolean) => void;
+  showMiniPlayerCodecBadge: boolean;
+  setShowMiniPlayerCodecBadge: (enabled: boolean) => void;
 
   // Actions
   playTrack: (track: Track, newQueue?: Track[]) => Promise<void>;
@@ -169,6 +188,46 @@ function initAudioEngine(state: PlayerState) {
     const time = audioElement.currentTime;
     usePlayerStore.setState({ currentTime: time });
 
+    // Update Windows / OS MediaSession playback position
+    if (
+      typeof window !== 'undefined' &&
+      'mediaSession' in navigator &&
+      'setPositionState' in navigator.mediaSession &&
+      audioElement.duration
+    ) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: audioElement.duration,
+          playbackRate: audioElement.playbackRate || 1.0,
+          position: time,
+        });
+      } catch {}
+    }
+
+    // Gapless Smart Pre-buffering: pre-fetch next track when 25s remaining
+    const dur = audioElement.duration;
+    if (dur > 0 && time > 0 && dur - time < 25) {
+      const { queue, queueIndex, repeatMode } = usePlayerStore.getState();
+      const nextIndex =
+        queueIndex + 1 < queue.length ? queueIndex + 1 : repeatMode === 'all' ? 0 : -1;
+      if (nextIndex !== -1 && queue[nextIndex]) {
+        const nextTrack = queue[nextIndex];
+        if (preloadedTrackId !== nextTrack.id) {
+          preloadedTrackId = nextTrack.id;
+          if (!preloadAudioElement) {
+            preloadAudioElement = new Audio();
+            preloadAudioElement.preload = 'auto';
+          }
+          const nextUrl =
+            nextTrack.isLocal && nextTrack.filePath
+              ? `http://127.0.0.1:47892/api/library/stream?path=${encodeURIComponent(nextTrack.filePath)}`
+              : `http://127.0.0.1:47892/api/stream/${encodeURIComponent(nextTrack.videoId || nextTrack.id)}/audio?title=${encodeURIComponent(nextTrack.title || '')}&artist=${encodeURIComponent(nextTrack.artist || '')}&duration=${nextTrack.durationSeconds || 0}&quality=lossless`;
+          preloadAudioElement.src = nextUrl;
+          preloadAudioElement.load();
+        }
+      }
+    }
+
     // Check SponsorBlock skip segments
     const { sponsorBlockEnabled, skipSegments } = usePlayerStore.getState();
     if (sponsorBlockEnabled && skipSegments.length > 0) {
@@ -220,19 +279,54 @@ function initAudioEngine(state: PlayerState) {
   });
 }
 
+let preloadedTrackId: string | null = null;
+let preloadAudioElement: HTMLAudioElement | null = null;
+
+// Helper to load persisted player session from previous runs
+const loadPersistedSession = () => {
+  try {
+    const rawTrack = localStorage.getItem('ytz_persisted_current_track');
+    const rawQueue = localStorage.getItem('ytz_persisted_queue');
+    const rawQueueIndex = localStorage.getItem('ytz_persisted_queue_index');
+    const rawVolume = localStorage.getItem('ytz_persisted_volume');
+    const rawRepeat = localStorage.getItem('ytz_persisted_repeat_mode');
+    const rawShuffle = localStorage.getItem('ytz_persisted_shuffle');
+
+    return {
+      currentTrack: rawTrack ? (JSON.parse(rawTrack) as Track) : null,
+      queue: rawQueue ? (JSON.parse(rawQueue) as Track[]) : [],
+      queueIndex: rawQueueIndex !== null ? parseInt(rawQueueIndex, 10) : -1,
+      volume: rawVolume !== null ? parseFloat(rawVolume) : 0.85,
+      repeatMode: (rawRepeat as 'off' | 'all' | 'one') || 'off',
+      shuffle: rawShuffle === 'true',
+    };
+  } catch {
+    return {
+      currentTrack: null,
+      queue: [],
+      queueIndex: -1,
+      volume: 0.85,
+      repeatMode: 'off' as const,
+      shuffle: false,
+    };
+  }
+};
+
+const initialSession = loadPersistedSession();
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
-  currentTrack: null,
-  queue: [],
-  queueIndex: -1,
+  currentTrack: initialSession.currentTrack,
+  queue: initialSession.queue,
+  queueIndex: initialSession.queueIndex,
   isPlaying: false,
   isLoading: false,
   currentTime: 0,
-  duration: 0,
-  volume: 0.85,
+  duration: initialSession.currentTrack ? (initialSession.currentTrack.durationSeconds || 0) : 0,
+  volume: initialSession.volume,
   isMuted: false,
   playbackSpeed: 1.0,
-  shuffle: false,
-  repeatMode: 'off',
+  shuffle: initialSession.shuffle,
+  repeatMode: initialSession.repeatMode,
   crossfadeSeconds: 3,
   sponsorBlockEnabled: true,
   skipSegments: [],
@@ -240,7 +334,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   lyrics: null,
   isLyricsLoading: false,
 
-  // Hi-Res Lossless Audio (BitChord Addon System)
+  // Hi-Res Lossless Audio
   audioQuality: 'lossless',
   setAudioQuality: (quality: 'lossless' | 'high' | 'auto') => {
     set({ audioQuality: quality });
@@ -269,6 +363,49 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   skipSilence: false,
   volumeNormalization: false,
 
+  // Lyrics Preferences
+  lyricsEnabled: localStorage.getItem('ytz_lyrics_enabled') !== 'false',
+  setLyricsEnabled: (enabled: boolean) => {
+    localStorage.setItem('ytz_lyrics_enabled', String(enabled));
+    set({ lyricsEnabled: enabled });
+  },
+  lyricsLayoutMode: ((localStorage.getItem('ytz_lyrics_layout_mode') as any) || 'split') as 'split' | 'fullscreen' | 'off',
+  setLyricsLayoutMode: (mode: 'split' | 'fullscreen' | 'off') => {
+    localStorage.setItem('ytz_lyrics_layout_mode', mode);
+    set({ lyricsLayoutMode: mode });
+  },
+
+  // Stats for Nerds & Audiophile Display Preferences
+  enableStatsForNerds: localStorage.getItem('ytz_enable_stats_for_nerds') !== 'false',
+  showAudiophileSpecs: localStorage.getItem('ytz_show_audiophile_specs') !== 'false',
+  showAudioQualityBadge: localStorage.getItem('ytz_show_audio_quality_badge') !== 'false',
+  showAudioPipelineCard: localStorage.getItem('ytz_show_audio_pipeline_card') !== 'false',
+  showMiniPlayerCodecBadge: localStorage.getItem('ytz_show_miniplayer_codec_badge') !== 'false',
+
+  setEnableStatsForNerds: (enabled: boolean) => {
+    localStorage.setItem('ytz_enable_stats_for_nerds', String(enabled));
+    set({
+      enableStatsForNerds: enabled,
+      showStatsForNerds: enabled ? get().showStatsForNerds : false,
+    });
+  },
+  setShowAudiophileSpecs: (enabled: boolean) => {
+    localStorage.setItem('ytz_show_audiophile_specs', String(enabled));
+    set({ showAudiophileSpecs: enabled });
+  },
+  setShowAudioQualityBadge: (enabled: boolean) => {
+    localStorage.setItem('ytz_show_audio_quality_badge', String(enabled));
+    set({ showAudioQualityBadge: enabled });
+  },
+  setShowAudioPipelineCard: (enabled: boolean) => {
+    localStorage.setItem('ytz_show_audio_pipeline_card', String(enabled));
+    set({ showAudioPipelineCard: enabled });
+  },
+  setShowMiniPlayerCodecBadge: (enabled: boolean) => {
+    localStorage.setItem('ytz_show_miniplayer_codec_badge', String(enabled));
+    set({ showMiniPlayerCodecBadge: enabled });
+  },
+
   // Video vs Audio Mutually Exclusive Playback Control
   activeVideoSource: null,
   setActiveVideoSource: (source: string | null) => {
@@ -283,20 +420,49 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   pause: () => {
+    if (get().isVideoMode) {
+      const iframes = document.querySelectorAll('iframe');
+      iframes.forEach((iframe) => {
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*');
+        }
+      });
+      const videos = document.querySelectorAll('video');
+      videos.forEach((video) => {
+        try { video.pause(); } catch {}
+      });
+    }
     if (audioElement && !audioElement.paused) {
       audioElement.pause();
     }
     set({ isPlaying: false });
   },
 
+  pauseAudio: () => {
+    if (audioElement && !audioElement.paused) {
+      audioElement.pause();
+    }
+  },
+
   play: () => {
     initAudioEngine(get());
+    if (get().isVideoMode) {
+      const iframes = document.querySelectorAll('iframe');
+      iframes.forEach((iframe) => {
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo' }), '*');
+        }
+      });
+      const videos = document.querySelectorAll('video');
+      videos.forEach((video) => {
+        try { video.play().catch(() => {}); } catch {}
+      });
+      set({ isPlaying: true });
+      return;
+    }
     if (!audioElement || !get().currentTrack) return;
     if (audioContext && audioContext.state === 'suspended') {
       audioContext.resume();
-    }
-    if (get().isVideoMode) {
-      set({ isVideoMode: false });
     }
     set({ activeVideoSource: null });
     audioElement.play().catch(() => {});
@@ -306,10 +472,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   playTrack: async (track: Track, newQueue?: Track[]) => {
     initAudioEngine(get());
 
-    if (get().isVideoMode) {
-      set({ isVideoMode: false });
+    if (!get().isVideoMode) {
+      set({ activeVideoSource: null });
     }
-    set({ activeVideoSource: null });
 
     let queue = get().queue;
     let queueIndex = get().queueIndex;
@@ -341,6 +506,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       lyrics: null,
     });
 
+    // Persist session to localStorage
+    try {
+      localStorage.setItem('ytz_persisted_current_track', JSON.stringify(track));
+      localStorage.setItem('ytz_persisted_queue', JSON.stringify(queue));
+      localStorage.setItem('ytz_persisted_queue_index', String(queueIndex));
+    } catch {}
+
+    // Record playback in SQLite history
+    api.recordPlayback(track).catch(() => {});
+
     // Resume AudioContext if suspended
     if (audioContext && audioContext.state === 'suspended') {
       audioContext.resume();
@@ -369,17 +544,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         const artistParam = encodeURIComponent(track.artist || '');
         const durParam = track.durationSeconds || 0;
 
-        // Use local range-aware audio streaming proxy with BitChord Addon lossless resolution
+        // Use local range-aware audio streaming proxy with lossless resolution
         streamUrl = `http://127.0.0.1:47892/api/stream/${encodeURIComponent(videoId)}/audio?title=${titleParam}&artist=${artistParam}&duration=${durParam}&quality=${quality}`;
 
-        // Fetch stream metadata with BitChord Lossless Addon details in background
+        // Fetch stream metadata with Lossless Addon details in background
         api.getAudioStream(videoId, track.title, track.artist, durParam, quality).then((streamInfo) => {
           set({
             audioStats: {
               codec: streamInfo.codec,
               bitrate: streamInfo.bitrate,
               duration: track.durationSeconds || 0,
-              provider: streamInfo.addonName || (streamInfo.isLossless ? 'BitChord Hi-Res Module' : 'YouTube Music 256k'),
+              provider: streamInfo.addonName || (streamInfo.isLossless ? 'Hi-Res Lossless Module' : 'YouTube Music 256k'),
               isLossless: streamInfo.isLossless,
               sampleRate: streamInfo.sampleRate,
               bitDepth: streamInfo.bitDepth,
@@ -412,17 +587,54 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         audioElement.src = streamUrl;
         audioElement.playbackRate = get().playbackSpeed;
         audioElement.volume = get().isMuted ? 0 : get().volume;
-        try {
-          await audioElement.play();
-          set({ isPlaying: true, isLoading: false });
-        } catch (playErr) {
-          console.warn('Playback deferred or blocked by browser autoplay policy', playErr);
-          set({ isPlaying: false, isLoading: false });
+        if (get().isVideoMode || get().activeVideoSource === 'youtube_video') {
+          audioElement.pause();
+          set({ isLoading: false });
+        } else {
+          try {
+            await audioElement.play();
+            set({ isPlaying: true, isLoading: false });
+          } catch (playErr) {
+            console.warn('Playback deferred or blocked by browser autoplay policy', playErr);
+            set({ isPlaying: false, isLoading: false });
+          }
         }
       }
 
       // Fetch Lyrics in background
       get().loadLyrics(track);
+
+      // Update OS / Windows MediaSession metadata & hardware keys
+      if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: track.title,
+            artist: track.artist || 'YT-Z Artist',
+            album: track.album || 'YT-Z Lossless Stream',
+            artwork: track.thumbnail
+              ? [
+                  { src: track.thumbnail, sizes: '96x96', type: 'image/jpeg' },
+                  { src: track.thumbnail, sizes: '256x256', type: 'image/jpeg' },
+                  { src: track.thumbnail, sizes: '512x512', type: 'image/jpeg' },
+                ]
+              : [],
+          });
+
+          navigator.mediaSession.setActionHandler('play', () => get().play());
+          navigator.mediaSession.setActionHandler('pause', () => get().pause());
+          navigator.mediaSession.setActionHandler('previoustrack', () => get().previous());
+          navigator.mediaSession.setActionHandler('nexttrack', () => get().next());
+          navigator.mediaSession.setActionHandler('seekto', (details) => {
+            if (details.seekTime !== undefined) get().seek(details.seekTime);
+          });
+          navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+            get().seek(Math.max(0, (audioElement?.currentTime || 0) - (details.seekOffset || 10)));
+          });
+          navigator.mediaSession.setActionHandler('seekforward', (details) => {
+            get().seek((audioElement?.currentTime || 0) + (details.seekOffset || 10));
+          });
+        } catch {}
+      }
 
       // Auto radio recommendation if queue is nearing end
       if (queueIndex >= queue.length - 2 && !track.isLocal) {
@@ -443,14 +655,38 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   togglePlay: () => {
     initAudioEngine(get());
+    if (get().isVideoMode) {
+      const isPlaying = get().isPlaying;
+      const iframes = document.querySelectorAll('iframe');
+      iframes.forEach((iframe) => {
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(
+            JSON.stringify({
+              event: 'command',
+              func: isPlaying ? 'pauseVideo' : 'playVideo',
+            }),
+            '*'
+          );
+        }
+      });
+      const videos = document.querySelectorAll('video');
+      videos.forEach((video) => {
+        try {
+          if (isPlaying) {
+            video.pause();
+          } else {
+            video.play().catch(() => {});
+          }
+        } catch {}
+      });
+      set({ isPlaying: !isPlaying });
+      return;
+    }
     if (!audioElement || !get().currentTrack) return;
     if (audioContext && audioContext.state === 'suspended') {
       audioContext.resume();
     }
     if (audioElement.paused) {
-      if (get().isVideoMode) {
-        set({ isVideoMode: false });
-      }
       set({ activeVideoSource: null });
       audioElement.play().catch(() => {});
       set({ isPlaying: true });
@@ -461,6 +697,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   next: async () => {
+    const { activeVideoSource } = get();
+    // If a persistent YouTube video is actively playing, advance the video queue
+    if (activeVideoSource === 'youtube_video') {
+      const { useVideoStore } = await import('./useVideoStore');
+      if (useVideoStore.getState().activeVideo) {
+        useVideoStore.getState().nextVideo();
+        return;
+      }
+    }
+
     const { queue, queueIndex, shuffle, repeatMode } = get();
     if (queue.length === 0) return;
 
@@ -482,10 +728,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   previous: async () => {
-    const { queue, queueIndex, currentTime } = get();
-    if (currentTime > 3 && audioElement) {
-      audioElement.currentTime = 0;
-      set({ currentTime: 0 });
+    const { activeVideoSource } = get();
+    // If a persistent YouTube video is actively playing, rewind to previous video
+    if (activeVideoSource === 'youtube_video') {
+      const { useVideoStore } = await import('./useVideoStore');
+      if (useVideoStore.getState().activeVideo) {
+        useVideoStore.getState().previousVideo();
+        return;
+      }
+    }
+
+    const { queue, queueIndex, currentTime, isVideoMode } = get();
+    if (currentTime > 3) {
+      get().seek(0);
       return;
     }
 
@@ -497,10 +752,31 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   seek: (seconds: number) => {
+    if (get().isVideoMode) {
+      const iframes = document.querySelectorAll('iframe');
+      iframes.forEach((iframe) => {
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(
+            JSON.stringify({
+              event: 'command',
+              func: 'seekTo',
+              args: [seconds, true],
+            }),
+            '*'
+          );
+        }
+      });
+      const videos = document.querySelectorAll('video');
+      videos.forEach((video) => {
+        try {
+          video.currentTime = seconds;
+        } catch {}
+      });
+    }
     if (audioElement) {
       audioElement.currentTime = seconds;
-      set({ currentTime: seconds });
     }
+    set({ currentTime: seconds });
   },
 
   setVolume: (val: number) => {
@@ -508,6 +784,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (audioElement) {
       audioElement.volume = clamped;
     }
+    localStorage.setItem('ytz_persisted_volume', String(clamped));
     set({ volume: clamped, isMuted: clamped === 0 });
   },
 
@@ -527,13 +804,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   toggleShuffle: () => {
-    set((s) => ({ shuffle: !s.shuffle }));
+    const nextShuffle = !get().shuffle;
+    localStorage.setItem('ytz_persisted_shuffle', String(nextShuffle));
+    set({ shuffle: nextShuffle });
   },
 
   cycleRepeat: () => {
     const modes: ('off' | 'all' | 'one')[] = ['off', 'all', 'one'];
     const current = get().repeatMode;
     const nextMode = modes[(modes.indexOf(current) + 1) % modes.length];
+    localStorage.setItem('ytz_persisted_repeat_mode', nextMode);
     set({ repeatMode: nextMode });
   },
 
@@ -572,10 +852,18 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setExpanded: (expanded: boolean) => set({ isExpanded: expanded }),
   setVideoMode: (video: boolean) => set({ isVideoMode: video }),
-  toggleLyrics: () => set((s) => ({ isLyricsOpen: !s.isLyricsOpen })),
+  toggleLyrics: () => {
+    const cur = get().lyricsLayoutMode;
+    const next = cur === 'off' ? 'split' : 'off';
+    get().setLyricsLayoutMode(next);
+    set({ isLyricsOpen: next !== 'off' });
+  },
   toggleEqualizer: () => set((s) => ({ isEqualizerOpen: !s.isEqualizerOpen })),
   toggleQueue: () => set((s) => ({ isQueueOpen: !s.isQueueOpen })),
-  toggleStatsForNerds: () => set((s) => ({ showStatsForNerds: !s.showStatsForNerds })),
+  toggleStatsForNerds: () => {
+    if (!get().enableStatsForNerds && !get().showStatsForNerds) return;
+    set((s) => ({ showStatsForNerds: !s.showStatsForNerds }));
+  },
   toggleSleepTimer: () => set((s) => ({ isSleepTimerOpen: !s.isSleepTimerOpen })),
 
   setSleepTimer: (minutes: number | null, stopAfterTrack = false) => {
@@ -667,6 +955,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   loadLyrics: async (track: Track) => {
+    if (!get().lyricsEnabled) {
+      set({ lyrics: null, isLyricsLoading: false });
+      return;
+    }
     set({ isLyricsLoading: true });
     try {
       const res = await api.getLyrics(track.title, track.artist, track.durationSeconds || 0);

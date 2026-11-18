@@ -1,6 +1,5 @@
 """
 Industrial yt-dlp Downloader Engine for YT-Z.
-Ported and enhanced from StreamFlow Pro:
 Concurrent downloads, video (4K/1080p/720p) and audio (MP3 320k/FLAC/M4A/OPUS/WAV),
 metadata, thumbnail, and lyrics embedding, progress event hooks.
 """

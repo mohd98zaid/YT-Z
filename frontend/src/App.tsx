@@ -14,6 +14,8 @@ import { SettingsPage } from './pages/SettingsPage';
 import { PluginsPage } from './pages/PluginsPage';
 import { YouTubePage } from './pages/YouTubePage';
 import { SleepTimerModal } from './components/Player/SleepTimerModal';
+import { PersistentVideoPlayer } from './components/Player/PersistentVideoPlayer';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { useThemeStore } from './stores/useThemeStore';
 import { useDownloadStore } from './stores/useDownloadStore';
 import { usePlayerStore } from './stores/usePlayerStore';
@@ -93,6 +95,12 @@ export const App: React.FC = () => {
 
       {/* Sleep Timer Modal */}
       <SleepTimerModal />
+
+      {/* Global Keyboard Shortcuts Modal */}
+      <KeyboardShortcutsModal />
+
+      {/* Global Persistent Video Player (Cinema + Sidebar PiP) */}
+      <PersistentVideoPlayer />
     </div>
   );
 };

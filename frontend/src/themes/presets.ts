@@ -319,7 +319,7 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     id: 'glassy-blur',
     name: 'Glassy Blur / Haze',
-    description: 'Deep frosted blur glass with ethereal purple glow from BitChord',
+    description: 'Deep frosted blur glass with ethereal purple glow',
     category: 'Dark',
     colors: {
       bgMain: '#0d0d17',

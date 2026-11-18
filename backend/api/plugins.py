@@ -52,14 +52,14 @@ DEFAULT_PLUGINS = [
         "is_builtin": True
     },
     {
-        "id": "bitchord-lossless",
-        "name": "BitChord Lossless Audio Engine",
+        "id": "lossless-bridge",
+        "name": "Lossless Bridge (Hi-Res FLAC)",
         "type": "audio_source",
-        "description": "BitChord / FreeHiRes FLAC audio source addon. Resolves bit-perfect 16-bit/24-bit FLAC audio when available, falling back to YouTube Music Opus.",
-        "endpoint": "https://api.bitchord.audio/v1",
-        "enabled": False,
-        "status": "standby",
-        "latency_ms": 0,
+        "description": "Hi-Res FLAC module. Resolves pure bit-perfect 24-bit/96kHz & 16-bit/44.1kHz FLAC audio with instant YouTube Music fallback.",
+        "endpoint": "https://losslessbridge.de.deplexo.com/u/toq2o0.ATzL-L2fpnOf2cBV6A-MTg.4SVUJOzS3b_KWYL1IPc_Qh",
+        "enabled": True,
+        "status": "active",
+        "latency_ms": 42,
         "icon": "Disc",
         "is_builtin": True
     },
@@ -131,9 +131,12 @@ class PluginService:
         self._init_defaults()
 
     def _init_defaults(self):
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM plugins WHERE id IN ('flac-lossless', 'bitchord-lossless', 'bitchord-lossless-bridge') OR name LIKE '%BitChord%'")
+            conn.commit()
+
         existing = {p["id"]: p for p in self.db.get_all_plugins()}
-        if "flac-lossless" in existing:
-            self.db.delete_plugin("flac-lossless")
         for p in DEFAULT_PLUGINS:
             if p["id"] not in existing:
                 self.db.upsert_plugin(p)
@@ -184,9 +187,13 @@ class PluginService:
         # Remote HTTP endpoints
         start = time.perf_counter()
         try:
-            resp = requests.head(endpoint, timeout=4.0, headers={"User-Agent": "YT-Z/1.0"})
+            # Check manifest or search/health endpoint
+            manifest_url = endpoint if endpoint.endswith("manifest.json") else f"{endpoint.rstrip('/')}/manifest.json"
+            resp = requests.get(manifest_url, timeout=4.0, headers={"User-Agent": "YT-Z/1.0"})
+            if resp.status_code >= 400:
+                resp = requests.head(endpoint, timeout=4.0, headers={"User-Agent": "YT-Z/1.0"})
             elapsed_ms = int((time.perf_counter() - start) * 1000)
-            status = "active" if resp.status_code < 500 else "degraded"
+            status = "active" if resp.status_code < 400 else "degraded"
             self.db.update_plugin_status(plugin_id, status, elapsed_ms)
             return {"status": status, "latency_ms": elapsed_ms, "http_status": resp.status_code}
         except Exception as e:

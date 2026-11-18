@@ -5,6 +5,7 @@ Stored in ~/.ytz/ytz.db
 """
 import sqlite3
 import json
+import time
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -91,7 +92,7 @@ class DatabaseManager:
             );
             """)
 
-            # Pluggable Sources & Extensions table (BitChord & ytm-rs style)
+            # Pluggable Sources & Extensions table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS plugins (
                 id TEXT PRIMARY KEY,
@@ -106,6 +107,59 @@ class DatabaseManager:
                 icon TEXT,
                 is_builtin INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+
+            # Search History table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS search_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query TEXT NOT NULL UNIQUE,
+                searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+
+            # Playback / Listening History table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS playback_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id TEXT NOT NULL,
+                video_id TEXT,
+                title TEXT NOT NULL,
+                artist TEXT,
+                album TEXT,
+                thumbnail TEXT,
+                duration INTEGER DEFAULT 0,
+                played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+
+            # Custom Playlists table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS custom_playlists (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                thumbnail TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+
+            # Custom Playlist Tracks table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS custom_playlist_tracks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id TEXT NOT NULL,
+                track_id TEXT NOT NULL,
+                video_id TEXT,
+                title TEXT NOT NULL,
+                artist TEXT,
+                album TEXT,
+                thumbnail TEXT,
+                duration TEXT,
+                duration_seconds INTEGER DEFAULT 0,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (playlist_id) REFERENCES custom_playlists(id) ON DELETE CASCADE
             );
             """)
 
@@ -289,4 +343,179 @@ class DatabaseManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE plugins SET status = ?, latency_ms = ? WHERE id = ?", (status, latency_ms, plugin_id))
+            conn.commit()
+
+    # ---- Search History Operations ----
+
+    def add_search_query(self, query: str) -> None:
+        q = query.strip()
+        if not q:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO search_history (query, searched_at)
+            VALUES (?, CURRENT_TIMESTAMP)
+            ON CONFLICT(query) DO UPDATE SET searched_at = CURRENT_TIMESTAMP
+            """, (q,))
+            # Keep latest 50 queries
+            cursor.execute("""
+            DELETE FROM search_history WHERE id NOT IN (
+                SELECT id FROM search_history ORDER BY searched_at DESC LIMIT 50
+            )
+            """)
+            conn.commit()
+
+    def get_search_history(self, limit: int = 15) -> List[str]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT query FROM search_history ORDER BY searched_at DESC LIMIT ?",
+                (limit,)
+            )
+            return [row["query"] for row in cursor.fetchall()]
+
+    def delete_search_query(self, query: str) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM search_history WHERE query = ?", (query,))
+            conn.commit()
+
+    def clear_search_history(self) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM search_history")
+            conn.commit()
+
+    # ---- Playback History Operations ----
+
+    def add_playback_history(self, track: Dict[str, Any]) -> None:
+        t_id = track.get("id") or track.get("videoId")
+        if not t_id:
+            return
+        title = track.get("title") or "Unknown Track"
+        artist = track.get("artist") or ""
+        album = track.get("album") or ""
+        thumbnail = track.get("thumbnail") or ""
+        duration = track.get("durationSeconds") or track.get("duration") or 0
+        if isinstance(duration, str):
+            try:
+                parts = [int(p) for p in duration.split(":")]
+                duration = parts[0] * 60 + parts[1] if len(parts) == 2 else parts[0] * 3600 + parts[1] * 60 + parts[2]
+            except Exception:
+                duration = 0
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM playback_history WHERE track_id = ?", (t_id,))
+            cursor.execute("""
+            INSERT INTO playback_history (track_id, video_id, title, artist, album, thumbnail, duration, played_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (t_id, track.get("videoId", t_id), title, artist, album, thumbnail, duration))
+            # Keep latest 100 history tracks
+            cursor.execute("""
+            DELETE FROM playback_history WHERE id NOT IN (
+                SELECT id FROM playback_history ORDER BY played_at DESC LIMIT 100
+            )
+            """)
+            conn.commit()
+
+    def get_playback_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT track_id as id, video_id as videoId, title, artist, album, thumbnail, duration, played_at
+            FROM playback_history ORDER BY played_at DESC LIMIT ?
+            """, (limit,))
+            return [dict(r) for r in cursor.fetchall()]
+
+    def delete_playback_history(self, track_id: str) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM playback_history WHERE track_id = ?", (track_id,))
+            conn.commit()
+
+    def clear_playback_history(self) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM playback_history")
+            conn.commit()
+
+    # ---- Custom Playlist Operations ----
+
+    def create_custom_playlist(self, name: str, description: str = "", thumbnail: str = "") -> Dict[str, Any]:
+        p_id = f"pl_{int(time.time() * 1000)}"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO custom_playlists (id, name, description, thumbnail)
+            VALUES (?, ?, ?, ?)
+            """, (p_id, name, description, thumbnail))
+            conn.commit()
+        return {"id": p_id, "name": name, "description": description, "thumbnail": thumbnail, "trackCount": 0}
+
+    def get_custom_playlists(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT p.id, p.name, p.description, p.thumbnail, p.created_at,
+                   COUNT(t.id) as trackCount
+            FROM custom_playlists p
+            LEFT JOIN custom_playlist_tracks t ON p.id = t.playlist_id
+            GROUP BY p.id
+            ORDER BY p.created_at DESC
+            """)
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_custom_playlist_details(self, playlist_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, description, thumbnail, created_at FROM custom_playlists WHERE id = ?", (playlist_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            pl = dict(row)
+            cursor.execute("""
+            SELECT track_id as id, video_id as videoId, title, artist, album, thumbnail, duration, duration_seconds as durationSeconds, added_at
+            FROM custom_playlist_tracks
+            WHERE playlist_id = ?
+            ORDER BY id ASC
+            """, (playlist_id,))
+            pl["tracks"] = [dict(r) for r in cursor.fetchall()]
+            pl["trackCount"] = len(pl["tracks"])
+            return pl
+
+    def delete_custom_playlist(self, playlist_id: str) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM custom_playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+            cursor.execute("DELETE FROM custom_playlists WHERE id = ?", (playlist_id,))
+            conn.commit()
+
+    def add_track_to_playlist(self, playlist_id: str, track: Dict[str, Any]) -> None:
+        t_id = track.get("id") or track.get("videoId")
+        if not t_id:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO custom_playlist_tracks (playlist_id, track_id, video_id, title, artist, album, thumbnail, duration, duration_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                playlist_id, t_id, track.get("videoId", t_id),
+                track.get("title", "Track"), track.get("artist", ""),
+                track.get("album", ""), track.get("thumbnail", ""),
+                str(track.get("duration", "0:00")), int(track.get("durationSeconds", 0) or 0)
+            ))
+            # Update thumbnail of playlist to first track thumbnail if none
+            cursor.execute("""
+            UPDATE custom_playlists SET thumbnail = ?
+            WHERE id = ? AND (thumbnail IS NULL OR thumbnail = '')
+            """, (track.get("thumbnail", ""), playlist_id))
+            conn.commit()
+
+    def remove_track_from_playlist(self, playlist_id: str, track_id: str) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM custom_playlist_tracks WHERE playlist_id = ? AND track_id = ?", (playlist_id, track_id))
             conn.commit()

@@ -14,6 +14,12 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
+  Activity,
+  Info,
+  Mic2,
+  HardDrive,
+  Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import { THEME_PRESETS } from '../themes/presets';
 import { useThemeStore } from '../stores/useThemeStore';
@@ -29,6 +35,22 @@ export const SettingsPage: React.FC = () => {
     toggleSkipSilence,
     volumeNormalization,
     toggleVolumeNormalization,
+    enableStatsForNerds,
+    setEnableStatsForNerds,
+    lyricsEnabled,
+    setLyricsEnabled,
+    lyricsLayoutMode,
+    setLyricsLayoutMode,
+    showAudiophileSpecs,
+    setShowAudiophileSpecs,
+    showAudioQualityBadge,
+    setShowAudioQualityBadge,
+    showAudioPipelineCard,
+    setShowAudioPipelineCard,
+    showMiniPlayerCodecBadge,
+    setShowMiniPlayerCodecBadge,
+    audioQuality,
+    setAudioQuality,
   } = usePlayerStore();
 
   const [downloadDir, setDownloadDir] = useState('');
@@ -43,8 +65,17 @@ export const SettingsPage: React.FC = () => {
   const [isThemesCollapsed, setIsThemesCollapsed] = useState(true);
   const [themeFilter, setThemeFilter] = useState('all');
   const [themeSearch, setThemeSearch] = useState('');
+  const [storageInfo, setStorageInfo] = useState<any>(null);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [cacheToast, setCacheToast] = useState('');
+  const [cacheClearedSuccess, setCacheClearedSuccess] = useState(false);
+
+  const loadStorage = () => {
+    api.getStorageInfo().then(setStorageInfo).catch(() => {});
+  };
 
   useEffect(() => {
+    loadStorage();
     api.getConfig().then((cfg) => {
       if (cfg) {
         setDownloadDir(cfg.download_dir || '');
@@ -117,7 +148,7 @@ export const SettingsPage: React.FC = () => {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <h2 className="text-base sm:text-lg font-bold text-foreground">
-                        Theme Presets (from ytm-rs &amp; BitChord)
+                        Theme Presets
                       </h2>
                       <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-primary/15 text-primary border border-primary/25">
                         30+ Themes
@@ -314,6 +345,192 @@ export const SettingsPage: React.FC = () => {
         </div>
       </section>
 
+      {/* Stats for Nerds & Audiophile Display Settings */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Activity className="w-6 h-6 text-primary" />
+          <h2 className="text-xl font-bold text-foreground">Stats for Nerds & Audiophile Display</h2>
+        </div>
+
+        <div className="bg-surface border border-border rounded-3xl p-6 shadow-xl space-y-6">
+          {/* Master Setting: Stats for Nerds (Audio Pipeline Modal) */}
+          <div className="flex items-center justify-between pb-5 border-b border-border/50">
+            <div>
+              <div className="flex items-center gap-2">
+                <Info className="w-4 h-4 text-primary" />
+                <h4 className="font-bold text-sm text-foreground">Stats for Nerds</h4>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary font-bold">
+                  Audio Pipeline Modal
+                </span>
+              </div>
+              <p className="text-xs text-foreground-muted mt-1">
+                Enable the Stats for Nerds button in the player header to inspect real-time signal path architecture (stream source, 24-bit/16-bit PCM data rate, hardware decoder, resampler, and DAC output).
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={enableStatsForNerds}
+              onChange={(e) => setEnableStatsForNerds(e.target.checked)}
+              className="w-5 h-5 rounded accent-primary cursor-pointer shrink-0"
+            />
+          </div>
+
+          {/* Audio Quality Target */}
+          <div>
+            <h4 className="font-bold text-sm text-foreground mb-1">Audio Quality Target</h4>
+            <p className="text-xs text-foreground-muted mb-3">
+              Preferred streaming format. Lossless queries enabled add-ons (Lossless Bridge) and falls back to YouTube Music Opus.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 max-w-xl">
+              {[
+                { id: 'lossless', label: 'Lossless FLAC', desc: 'Bit-perfect 1411k+ / 24-bit 96kHz' },
+                { id: 'high', label: 'High (320k)', desc: 'Enhanced bitrate stream' },
+                { id: 'auto', label: 'Standard', desc: 'YouTube Music Opus 256k' },
+              ].map((mode) => (
+                <button
+                  key={mode.id}
+                  onClick={() => setAudioQuality(mode.id as any)}
+                  className={`p-3 rounded-2xl border text-left transition-all ${
+                    audioQuality === mode.id
+                      ? 'bg-primary/20 border-primary text-primary shadow-sm shadow-primary/20 font-bold'
+                      : 'bg-surface-elevated/70 border-border/70 text-foreground-muted hover:text-foreground hover:bg-surface-elevated'
+                  }`}
+                >
+                  <div className="text-xs font-bold leading-tight">{mode.label}</div>
+                  <div className="text-[10px] opacity-75 mt-0.5">{mode.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 1. Audiophile Specs line below artwork */}
+          <div className="flex items-center justify-between pt-4 border-t border-border/50">
+            <div>
+              <h4 className="font-bold text-sm text-foreground">Audiophile Specs Under Artwork</h4>
+              <p className="text-xs text-foreground-muted">
+                Displays the subtle codec, bit depth, sample rate, bitrate and stereo line below the vinyl artwork (e.g. FLAC · 24-bit · 96.0 kHz · 2144 kbps · Stereo).
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={showAudiophileSpecs}
+              onChange={(e) => setShowAudiophileSpecs(e.target.checked)}
+              className="w-5 h-5 rounded accent-primary cursor-pointer shrink-0"
+            />
+          </div>
+
+          {/* 2. Audio Quality Pill under progress bar */}
+          <div className="flex items-center justify-between pt-4 border-t border-border/50">
+            <div>
+              <h4 className="font-bold text-sm text-foreground">Lossless / Codec Pill Under Progress Bar</h4>
+              <p className="text-xs text-foreground-muted">
+                Displays the centered 〰 Hi-Res Lossless or Standard Opus badge under the playback slider.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={showAudioQualityBadge}
+              onChange={(e) => setShowAudioQualityBadge(e.target.checked)}
+              className="w-5 h-5 rounded accent-primary cursor-pointer shrink-0"
+            />
+          </div>
+
+          {/* 3. Audio Pipeline Shortcut Card */}
+          <div className="flex items-center justify-between pt-4 border-t border-border/50">
+            <div>
+              <h4 className="font-bold text-sm text-foreground">Audio Pipeline Diagnostics Card</h4>
+              <p className="text-xs text-foreground-muted">
+                Shows the quick-access Audio Pipeline shortcut row below the player controls to inspect live signal path, decoder and output.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={showAudioPipelineCard}
+              onChange={(e) => setShowAudioPipelineCard(e.target.checked)}
+              className="w-5 h-5 rounded accent-primary cursor-pointer shrink-0"
+            />
+          </div>
+
+          {/* 4. MiniPlayer Codec Pill */}
+          <div className="flex items-center justify-between pt-4 border-t border-border/50">
+            <div>
+              <h4 className="font-bold text-sm text-foreground">MiniPlayer Lossless / Codec Badge</h4>
+              <p className="text-xs text-foreground-muted">
+                Displays the amber LOSSLESS or OPUS pill beside the artist name in the bottom persistent MiniPlayer bar.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={showMiniPlayerCodecBadge}
+              onChange={(e) => setShowMiniPlayerCodecBadge(e.target.checked)}
+              className="w-5 h-5 rounded accent-primary cursor-pointer shrink-0"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Synced Lyrics & Fullscreen Karaoke Preferences */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Mic2 className="w-6 h-6 text-primary" />
+          <h2 className="text-xl font-bold text-foreground">Synced Lyrics & Karaoke Display</h2>
+        </div>
+
+        <div className="bg-surface border border-border rounded-3xl p-6 shadow-xl space-y-6">
+          {/* Master Enable/Disable Lyrics Option */}
+          <div className="flex items-center justify-between pb-4 border-b border-border/50">
+            <div>
+              <div className="flex items-center gap-2">
+                <Mic2 className="w-4 h-4 text-primary" />
+                <h4 className="font-bold text-sm text-foreground">Enable Synced Lyrics Engine</h4>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary font-bold">
+                  Word-Sync & Auto-Scroll
+                </span>
+              </div>
+              <p className="text-xs text-foreground-muted mt-1">
+                Automatically retrieve and display synchronized lyrics with syllable highlights and auto-centering scroll.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={lyricsEnabled}
+              onChange={(e) => setLyricsEnabled(e.target.checked)}
+              className="w-5 h-5 rounded accent-primary cursor-pointer shrink-0"
+            />
+          </div>
+
+          {/* Default Lyrics Layout in Expanded Player */}
+          {lyricsEnabled && (
+            <div>
+              <h4 className="font-bold text-sm text-foreground mb-1">Default Lyrics Layout in Player</h4>
+              <p className="text-xs text-foreground-muted mb-3">
+                Choose the default presentation when opening the Expanded Player. You can always switch or toggle fullscreen anytime in the player.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 max-w-xl">
+                {[
+                  { id: 'split', label: 'Split View', desc: 'Side-by-side artwork & synced lyrics' },
+                  { id: 'fullscreen', label: 'Fullscreen Lyrics', desc: 'Immersive full-screen karaoke view' },
+                  { id: 'off', label: 'Artwork Only', desc: 'Centered vinyl with lyrics closed' },
+                ].map((mode) => (
+                  <button
+                    key={mode.id}
+                    onClick={() => setLyricsLayoutMode(mode.id as any)}
+                    className={`p-3 rounded-2xl border text-left transition-all ${
+                      lyricsLayoutMode === mode.id
+                        ? 'bg-primary/20 border-primary text-primary shadow-sm shadow-primary/20 font-bold'
+                        : 'bg-surface-elevated/70 border-border/70 text-foreground-muted hover:text-foreground hover:bg-surface-elevated'
+                    }`}
+                  >
+                    <div className="text-xs font-bold leading-tight">{mode.label}</div>
+                    <div className="text-[10px] opacity-75 mt-0.5">{mode.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* Downloader Settings */}
       <section className="space-y-4">
         <div className="flex items-center gap-2">
@@ -411,12 +628,12 @@ export const SettingsPage: React.FC = () => {
         </div>
       </section>
 
-      {/* Connectivity & Audio DSP Tweaks (BitChord & ytm-rs features) */}
+      {/* Connectivity & Audio DSP Tweaks */}
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Radio className="w-6 h-6 text-primary" />
           <h2 className="text-xl font-bold text-foreground">
-            Connectivity & Audio DSP Tweaks (from BitChord & ytm-rs)
+            Connectivity & Audio DSP Tweaks
           </h2>
         </div>
 
@@ -515,6 +732,89 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* Storage & Cache Management */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <HardDrive className="w-6 h-6 text-primary" />
+          <h2 className="text-xl font-bold text-foreground">Storage & Cache Management</h2>
+        </div>
+
+        <div className="bg-surface border border-border rounded-3xl p-6 shadow-xl space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="p-4 rounded-2xl bg-surface-elevated/60 border border-border/50">
+              <span className="text-xs text-foreground-muted block font-semibold">Active Cache Size</span>
+              <span className="text-2xl font-bold font-mono text-foreground mt-1 block">
+                {storageInfo?.cacheSizeMB || 0} MB
+              </span>
+              <span className="text-[11px] text-foreground-subtle mt-0.5 block">Audio streams & temporary buffers</span>
+            </div>
+            <div className="p-4 rounded-2xl bg-surface-elevated/60 border border-border/50">
+              <span className="text-xs text-foreground-muted block font-semibold">Offline Downloads Folder</span>
+              <span className="text-2xl font-bold font-mono text-foreground mt-1 block">
+                {storageInfo?.downloadsSizeMB || 0} MB
+              </span>
+              <span className="text-[11px] text-foreground-subtle mt-0.5 block truncate" title={storageInfo?.downloadsPath}>
+                {storageInfo?.downloadsPath}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-border/50">
+            <div>
+              <h4 className="font-bold text-sm text-foreground">Purge Temporary Audio Cache</h4>
+              <p className="text-xs text-foreground-muted">Clears cached audio stream URLs, segment buffers, and thumbnail memory.</p>
+            </div>
+            <button
+              onClick={async () => {
+                setIsClearingCache(true);
+                try {
+                  const res = await api.clearCache();
+                  setStorageInfo((prev: any) => ({ ...prev, cacheSizeBytes: 0, cacheSizeMB: 0 }));
+                  setCacheClearedSuccess(true);
+                  const msg = res?.freedMB ? `Cache Purged! Freed ${res.freedMB} MB` : 'Temporary Cache Successfully Purged!';
+                  setCacheToast(msg);
+                  setTimeout(() => setCacheToast(''), 3500);
+                  setTimeout(() => setCacheClearedSuccess(false), 2500);
+                  setTimeout(loadStorage, 1500);
+                } catch {
+                  setCacheToast('Failed to purge cache');
+                  setTimeout(() => setCacheToast(''), 3000);
+                }
+                setIsClearingCache(false);
+              }}
+              disabled={isClearingCache}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+                cacheClearedSuccess
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-sm'
+                  : 'bg-surface-elevated hover:bg-border/60 text-foreground border-border'
+              }`}
+            >
+              {isClearingCache ? (
+                <span className="flex items-center gap-1.5">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Purging...</span>
+                </span>
+              ) : cacheClearedSuccess ? (
+                <span className="flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Cache Cleared</span>
+                </span>
+              ) : (
+                'Purge Cache'
+              )}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Cache Toast Notification */}
+      {cacheToast && (
+        <div className="fixed bottom-24 right-8 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-xs font-bold shadow-xl animate-fadeIn">
+          <Check className="w-4 h-4" />
+          <span>{cacheToast}</span>
+        </div>
+      )}
     </div>
   );
 };

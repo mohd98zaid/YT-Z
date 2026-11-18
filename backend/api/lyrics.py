@@ -1,6 +1,5 @@
 """
 Multi-provider Lyrics Engine for YT-Z.
-Inspired by BitChord & ytm-rs:
 Supports LRCLIB, lrc.red (syllable TTML), KuGou, and Genius.
 Parses syllable/word-synced, line-synced LRC, and plain lyrics.
 """

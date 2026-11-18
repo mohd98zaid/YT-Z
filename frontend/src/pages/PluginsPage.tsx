@@ -148,7 +148,7 @@ export const PluginsPage: React.FC = () => {
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/20 text-primary text-xs font-extrabold border border-primary/30 mb-2">
             <Zap className="w-3.5 h-3.5" />
-            <span>BITCHORD & YTM-RS EXTENSIONS</span>
+            <span>AUDIO ENGINE EXTENSIONS</span>
           </div>
           <h1 className="text-3xl font-black text-foreground tracking-tight">
             Pluggable Module Sources & Extensions
@@ -181,7 +181,7 @@ export const PluginsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* BitChord Addon & Hi-Res Audio Architecture Banner */}
+      {/* Hi-Res Lossless Audio Architecture Banner */}
       <div className="p-5 rounded-3xl bg-gradient-to-r from-amber-500/10 via-surface to-primary/10 border border-amber-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/10">
@@ -189,13 +189,13 @@ export const PluginsPage: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="font-extrabold text-sm text-foreground">BitChord Hi-Res Lossless Architecture</h3>
+              <h3 className="font-extrabold text-sm text-foreground">Hi-Res Lossless Audio Architecture</h3>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40">
                 ACTIVE
               </span>
             </div>
             <p className="text-xs text-foreground-muted mt-0.5 max-w-xl">
-              Audio source add-ons resolve 16-bit / 24-bit bit-perfect FLAC audio via BitChord's JSON protocol (<code className="text-amber-400 font-mono text-[11px]">/search</code> &amp; <code className="text-amber-400 font-mono text-[11px]">/stream</code>). When offline or not found, playback automatically falls back to 256k YouTube Music Opus.
+              Audio source add-ons resolve 16-bit / 24-bit bit-perfect FLAC audio via standardized JSON protocol (<code className="text-amber-400 font-mono text-[11px]">/search</code> &amp; <code className="text-amber-400 font-mono text-[11px]">/stream</code>). When offline or not found, playback automatically falls back to 256k YouTube Music Opus.
             </p>
           </div>
         </div>
@@ -385,16 +385,16 @@ export const PluginsPage: React.FC = () => {
             {/* Quick Fill Presets */}
             <div className="mb-4 p-3 bg-surface-elevated/70 border border-border/80 rounded-2xl">
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-foreground-subtle block mb-1.5">
-                BitChord Quick Presets
+                Quick Addon Presets
               </span>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    setNewName('BitChord Unified Addon');
+                    setNewName('Unified Lossless Addon');
                     setNewType('audio_source');
                     setNewEndpoint('http://localhost:8080');
-                    setNewDescription('Local self-hosted BitChord unified lossless audio addon.');
+                    setNewDescription('Local self-hosted unified lossless audio addon.');
                   }}
                   className="px-2.5 py-1 rounded-lg bg-surface border border-border/80 hover:border-primary text-[11px] font-semibold text-foreground transition-all"
                 >
@@ -405,12 +405,12 @@ export const PluginsPage: React.FC = () => {
                   onClick={() => {
                     setNewName('Hi-Res FLAC Lossless Module');
                     setNewType('audio_source');
-                    setNewEndpoint('internal://bitchord/lossless-engine');
+                    setNewEndpoint('internal://lossless/engine');
                     setNewDescription('Bit-perfect 16-bit/44.1kHz and 24-bit/96kHz lossless FLAC decoding.');
                   }}
                   className="px-2.5 py-1 rounded-lg bg-surface border border-border/80 hover:border-primary text-[11px] font-semibold text-foreground transition-all"
                 >
-                  Internal BitChord Lossless Engine
+                  Native Lossless Audio Engine
                 </button>
               </div>
             </div>

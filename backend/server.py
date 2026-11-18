@@ -285,6 +285,72 @@ def stream_audio_proxy(
         logger.error(f"Error proxying audio for {video_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Failed to fetch audio: {e}")
 
+@app.get("/api/stream/{video_id}/video-info")
+def get_video_stream_info(video_id: str):
+    """
+    Resolve video stream metadata and direct proxy URL.
+    """
+    video_info = stream_resolver.resolve_video(video_id)
+    if not video_info:
+        raise HTTPException(status_code=404, detail="Could not resolve video stream for track.")
+    return {
+        "videoId": video_id,
+        "videoUrl": f"/api/stream/{video_id}/video",
+        "title": video_info.get("title", ""),
+        "duration": video_info.get("duration", 0),
+        "resolution": video_info.get("resolution", "360p"),
+        "audioQuality": "Standard YouTube Stream (160 kbps)"
+    }
+
+@app.get("/api/stream/{video_id}/video")
+def stream_video_proxy(video_id: str, request: Request):
+    """
+    Direct video streaming proxy with HTTP 206 Partial Content Range support.
+    Bypasses YouTube iframe embed restrictions (Error 150/152) for HTML5 video playback.
+    """
+    video_info = stream_resolver.resolve_video(video_id)
+    if not video_info or not video_info.get("streamUrl"):
+        raise HTTPException(status_code=404, detail="Could not resolve video stream for track.")
+
+    stream_url = video_info["streamUrl"]
+    range_header = request.headers.get("Range")
+    remote_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    if range_header:
+        remote_headers["Range"] = range_header
+
+    try:
+        resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=15)
+        content_type = resp.headers.get("Content-Type", "video/mp4")
+
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Type": content_type,
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+            "X-Video-Resolution": str(video_info.get("resolution", "360p")),
+        }
+        if "Content-Range" in resp.headers:
+            headers["Content-Range"] = resp.headers["Content-Range"]
+        if "Content-Length" in resp.headers:
+            headers["Content-Length"] = resp.headers["Content-Length"]
+
+        def chunk_generator():
+            for chunk in resp.iter_content(chunk_size=128 * 1024):
+                if chunk:
+                    yield chunk
+
+        return StreamingResponse(
+            chunk_generator(),
+            status_code=resp.status_code,
+            headers=headers,
+            media_type=content_type
+        )
+    except Exception as e:
+        logger.error(f"Error proxying video for {video_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch video: {e}")
+
 @app.get("/api/stream/{video_id}/segments")
 async def get_skip_segments(video_id: str):
     if not config_mgr.get("sponsorblock_enabled", True):
@@ -471,6 +537,200 @@ async def delete_plugin(plugin_id: str):
 async def test_plugin(plugin_id: str):
     result = plugin_svc.test_plugin(plugin_id)
     return result
+
+# ==================== Search & Playback History Endpoints ====================
+
+@app.get("/api/history/searches")
+def get_search_history(limit: int = Query(15)):
+    return db_mgr.get_search_history(limit)
+
+@app.post("/api/history/searches")
+def add_search_history(payload: Dict[str, str] = Body(...)):
+    query = payload.get("query", "").strip()
+    if query:
+        db_mgr.add_search_query(query)
+    return {"status": "ok"}
+
+@app.delete("/api/history/searches")
+def delete_search_history(query: Optional[str] = Query(None)):
+    if query:
+        db_mgr.delete_search_query(query)
+    else:
+        db_mgr.clear_search_history()
+    return {"status": "ok"}
+
+@app.get("/api/history/playback")
+def get_playback_history(limit: int = Query(50)):
+    return db_mgr.get_playback_history(limit)
+
+@app.post("/api/history/playback")
+def add_playback_history(track: Dict[str, Any] = Body(...)):
+    db_mgr.add_playback_history(track)
+    return {"status": "ok"}
+
+@app.delete("/api/history/playback")
+def delete_playback_history(track_id: Optional[str] = Query(None)):
+    if track_id:
+        db_mgr.delete_playback_history(track_id)
+    else:
+        db_mgr.clear_playback_history()
+    return {"status": "ok"}
+
+# ==================== Custom Playlists Endpoints ====================
+
+@app.get("/api/playlists/custom")
+def list_custom_playlists():
+    return db_mgr.get_custom_playlists()
+
+@app.post("/api/playlists/custom")
+def create_custom_playlist(payload: Dict[str, str] = Body(...)):
+    name = payload.get("name", "My Playlist").strip()
+    desc = payload.get("description", "").strip()
+    thumb = payload.get("thumbnail", "").strip()
+    return db_mgr.create_custom_playlist(name, desc, thumb)
+
+@app.get("/api/playlists/custom/{playlist_id}")
+def get_custom_playlist(playlist_id: str):
+    pl = db_mgr.get_custom_playlist_details(playlist_id)
+    if not pl:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    return pl
+
+@app.delete("/api/playlists/custom/{playlist_id}")
+def delete_custom_playlist(playlist_id: str):
+    db_mgr.delete_custom_playlist(playlist_id)
+    return {"status": "ok"}
+
+@app.post("/api/playlists/custom/{playlist_id}/tracks")
+def add_track_to_custom_playlist(playlist_id: str, track: Dict[str, Any] = Body(...)):
+    db_mgr.add_track_to_playlist(playlist_id, track)
+    return {"status": "ok"}
+
+@app.delete("/api/playlists/custom/{playlist_id}/tracks/{track_id}")
+def remove_track_from_custom_playlist(playlist_id: str, track_id: str):
+    db_mgr.remove_track_from_playlist(playlist_id, track_id)
+    return {"status": "ok"}
+
+# ==================== Built-in ID3 Tag Editor & Storage ====================
+
+@app.post("/api/library/edit-tags")
+def edit_audio_tags(payload: Dict[str, Any] = Body(...)):
+    file_path = payload.get("filePath", "")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Audio file not found on disk")
+
+    title = payload.get("title", "").strip()
+    artist = payload.get("artist", "").strip()
+    album = payload.get("album", "").strip()
+    year = payload.get("year", "").strip()
+    genre = payload.get("genre", "").strip()
+
+    try:
+        from mutagen.easyid3 import EasyID3
+        from mutagen.mp3 import MP3
+        from mutagen.flac import FLAC
+        from mutagen.mp4 import MP4
+
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == '.mp3':
+            try:
+                audio = EasyID3(file_path)
+            except Exception:
+                audio = MP3(file_path)
+                audio.add_tags()
+                audio = EasyID3(file_path)
+            if title: audio['title'] = title
+            if artist: audio['artist'] = artist
+            if album: audio['album'] = album
+            if year: audio['date'] = year
+            if genre: audio['genre'] = genre
+            audio.save()
+        elif ext == '.flac':
+            audio = FLAC(file_path)
+            if title: audio['title'] = title
+            if artist: audio['artist'] = artist
+            if album: audio['album'] = album
+            if year: audio['date'] = year
+            if genre: audio['genre'] = genre
+            audio.save()
+        elif ext in ('.m4a', '.mp4'):
+            audio = MP4(file_path)
+            if title: audio['\xa9nam'] = title
+            if artist: audio['\xa9ART'] = artist
+            if album: audio['\xa9alb'] = album
+            if year: audio['\xa9day'] = year
+            if genre: audio['\xa9gen'] = genre
+            audio.save()
+
+        return {"status": "ok", "filePath": file_path, "title": title, "artist": artist}
+    except Exception as e:
+        logger.error(f"Failed to edit tags for {file_path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update metadata: {e}")
+
+@app.get("/api/storage/info")
+def get_storage_info():
+    base_dir = Path.home() / ".ytz"
+    cache_dir = base_dir / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    downloads_dir = config_mgr.get("download_path", str(base_dir / "downloads"))
+    
+    def get_dir_size(path):
+        total = 0
+        p = Path(path)
+        if p.exists():
+            for f in p.rglob("*"):
+                if f.is_file():
+                    try:
+                        total += f.stat().st_size
+                    except Exception:
+                        pass
+        return total
+
+    from backend.api.stream import _STREAM_CACHE
+    disk_cache = get_dir_size(cache_dir)
+    mem_cache = len(_STREAM_CACHE) * 512 * 1024
+    total_cache = disk_cache + mem_cache
+    dl_size = get_dir_size(downloads_dir)
+
+    return {
+        "cacheSizeBytes": total_cache,
+        "cacheSizeMB": round(total_cache / (1024 * 1024), 2),
+        "downloadsSizeBytes": dl_size,
+        "downloadsSizeMB": round(dl_size / (1024 * 1024), 1),
+        "downloadsPath": str(downloads_dir),
+    }
+
+@app.post("/api/storage/clear-cache")
+def clear_storage_cache():
+    from backend.api.stream import _STREAM_CACHE
+    cleared_entries = len(_STREAM_CACHE)
+    _STREAM_CACHE.clear()
+
+    base_dir = Path.home() / ".ytz"
+    cache_dir = base_dir / "cache"
+    freed_bytes = 0
+    if cache_dir.exists():
+        for f in cache_dir.iterdir():
+            if f.is_file():
+                try:
+                    freed_bytes += f.stat().st_size
+                    f.unlink()
+                except Exception:
+                    pass
+
+    try:
+        with db_mgr._get_connection() as conn:
+            conn.execute("VACUUM")
+    except Exception as e:
+        logger.debug(f"VACUUM note: {e}")
+
+    freed_mb = round((freed_bytes + cleared_entries * 512 * 1024) / (1024 * 1024), 2)
+    return {
+        "status": "ok",
+        "cleared": True,
+        "clearedEntries": cleared_entries,
+        "freedMB": max(0.1, freed_mb) if cleared_entries > 0 or freed_bytes > 0 else 0.0,
+    }
 
 # ==================== General YouTube Search (Separate Service) ====================
 

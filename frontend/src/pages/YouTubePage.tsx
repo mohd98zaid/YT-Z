@@ -200,12 +200,23 @@ export const YouTubePage: React.FC = () => {
 
   const handleSelectVideo = (video: Track) => {
     const id = video.videoId || video.id;
-    playVideo({
-      id,
-      title: video.title,
-      artist: video.artist || 'YouTube',
-      thumbnail: video.thumbnail,
-    });
+    const currentList = searchResults.length > 0 ? searchResults : trendingVideos;
+    const queue = currentList.map((t) => ({
+      id: t.videoId || t.id,
+      title: t.title,
+      artist: t.artist || 'YouTube',
+      thumbnail: t.thumbnail,
+    }));
+
+    playVideo(
+      {
+        id,
+        title: video.title,
+        artist: video.artist || 'YouTube',
+        thumbnail: video.thumbnail,
+      },
+      queue
+    );
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
