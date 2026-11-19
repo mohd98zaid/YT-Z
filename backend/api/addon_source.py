@@ -7,6 +7,7 @@ with seamless fallback to YouTube Music 256k Opus.
 import time
 import logging
 import urllib.parse
+import concurrent.futures
 from typing import Dict, Any, Optional, List
 import requests
 from backend.core.database import DatabaseManager
@@ -54,106 +55,136 @@ class AddonSourceResolver:
             "Accept": "application/json",
         }
 
-        for source in audio_sources:
-            endpoint = source.get("endpoint", "").strip()
-            api_key = source.get("api_key", "").strip()
-            addon_name = source.get("name", "Lossless Addon")
+        # Query all enabled audio source add-ons concurrently in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(audio_sources))) as executor:
+            future_to_source = {
+                executor.submit(
+                    self._query_single_source,
+                    source,
+                    clean_title,
+                    clean_artist,
+                    search_query,
+                    duration,
+                    quality_preference,
+                    title,
+                    artist,
+                    headers
+                ): source
+                for source in audio_sources
+            }
 
-            if not endpoint:
-                continue
+            for future in concurrent.futures.as_completed(future_to_source):
+                try:
+                    res = future.result()
+                    if res:
+                        # Cancel remaining background queries immediately
+                        for f in future_to_source:
+                            f.cancel()
+                        return res
+                except Exception as e:
+                    logger.debug(f"Source query exception: {e}")
 
-            req_headers = dict(headers)
-            if api_key:
-                req_headers["Authorization"] = f"Bearer {api_key}"
-                req_headers["X-Addon-Key"] = api_key
+        return None
 
-            if not (endpoint.startswith("http://") or endpoint.startswith("https://")):
-                continue
+    def _query_single_source(
+        self,
+        source: Dict[str, Any],
+        clean_title: str,
+        clean_artist: str,
+        search_query: str,
+        duration: int,
+        quality_preference: str,
+        title: str,
+        artist: str,
+        headers: Dict[str, str]
+    ) -> Optional[Dict[str, Any]]:
+        endpoint = source.get("endpoint", "").strip()
+        api_key = source.get("api_key", "").strip()
+        addon_name = source.get("name", "Lossless Addon")
 
-            base_url = endpoint.rstrip("/")
+        if not endpoint or not (endpoint.startswith("http://") or endpoint.startswith("https://")):
+            return None
 
-            # ---------------------------------------------------------
-            # 1. Community Addon API Protocol
-            # ---------------------------------------------------------
-            try:
-                search_url = f"{base_url}/search?q={urllib.parse.quote(search_query)}"
-                resp = requests.get(search_url, headers=req_headers, timeout=4.0)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    raw_tracks = data.get("tracks") or data.get("results") or data.get("items") or []
-                    if isinstance(raw_tracks, list) and len(raw_tracks) > 0:
-                        # Rank candidates by title & artist similarity
-                        candidates = self._rank_candidates(raw_tracks, clean_title, clean_artist)
-                        for candidate in candidates[:4]:
-                            track_id = candidate.get("id") or candidate.get("trackId")
-                            if not track_id:
-                                continue
+        req_headers = dict(headers)
+        if api_key:
+            req_headers["Authorization"] = f"Bearer {api_key}"
+            req_headers["X-Addon-Key"] = api_key
 
-                            # Try direct route /stream/{track_id}
-                            stream_endpoints = [
-                                f"{base_url}/stream/{urllib.parse.quote(str(track_id))}",
-                                f"{base_url}/stream?id={urllib.parse.quote(str(track_id))}&quality={quality_preference}"
-                            ]
+        base_url = endpoint.rstrip("/")
 
-                            for s_url in stream_endpoints:
-                                try:
-                                    s_resp = requests.get(s_url, headers=req_headers, timeout=4.0)
-                                    if s_resp.status_code == 200:
-                                        s_data = s_resp.json()
-                                        media_url = s_data.get("url") or s_data.get("streamUrl") or s_data.get("stream_url")
-                                        if media_url and (media_url.startswith("http://") or media_url.startswith("https://")):
-                                            # Fast probe verify reachable stream
-                                            if self._verify_stream_url(media_url, req_headers):
-                                                merged = {**candidate, **s_data}
-                                                return self._format_stream_result(
-                                                    merged,
-                                                    addon_name,
-                                                    candidate.get("title", title),
-                                                    candidate.get("artist", artist),
-                                                    media_url
-                                                )
-                                except Exception as se:
-                                    logger.debug(f"Failed to fetch stream endpoint {s_url}: {se}")
-            except Exception as e:
-                logger.debug(f"Addon '{addon_name}' search failed: {e}")
+        # 1. Community Addon API Protocol (Fast 2.0s timeout)
+        try:
+            search_url = f"{base_url}/search?q={urllib.parse.quote(search_query)}"
+            resp = requests.get(search_url, headers=req_headers, timeout=2.0)
+            if resp.status_code in (401, 403, 404):
+                # Endpoint is rejecting authentication or is broken, abort this source immediately
+                return None
 
-            # ---------------------------------------------------------
-            # 2. Single-shot /resolve (POST or GET)
-            # ---------------------------------------------------------
-            try:
-                payload = {
-                    "title": clean_title,
-                    "artist": clean_artist,
-                    "query": search_query,
-                    "duration": duration,
-                    "quality": quality_preference,
-                }
-                resp = requests.post(f"{base_url}/resolve", json=payload, headers=req_headers, timeout=3.0)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    stream_url = data.get("streamUrl") or data.get("url")
-                    if stream_url and self._verify_stream_url(stream_url, req_headers):
-                        return self._format_stream_result(data, addon_name, title, artist, stream_url)
-            except Exception as e:
-                logger.debug(f"Addon '{addon_name}' /resolve failed: {e}")
+            if resp.status_code == 200:
+                data = resp.json()
+                raw_tracks = data.get("tracks") or data.get("results") or data.get("items") or []
+                if isinstance(raw_tracks, list) and len(raw_tracks) > 0:
+                    candidates = self._rank_candidates(raw_tracks, clean_title, clean_artist)
+                    for candidate in candidates[:3]:
+                        track_id = candidate.get("id") or candidate.get("trackId")
+                        if not track_id:
+                            continue
 
-            # ---------------------------------------------------------
-            # 3. Direct GET /stream?title=...&artist=...
-            # ---------------------------------------------------------
-            try:
-                direct_resp = requests.get(
-                    f"{base_url}/stream",
-                    params={"title": clean_title, "artist": clean_artist, "quality": quality_preference},
-                    headers=req_headers,
-                    timeout=3.0
-                )
-                if direct_resp.status_code == 200:
-                    direct_data = direct_resp.json()
-                    stream_url = direct_data.get("streamUrl") or direct_data.get("url")
-                    if stream_url and self._verify_stream_url(stream_url, req_headers):
-                        return self._format_stream_result(direct_data, addon_name, title, artist, stream_url)
-            except Exception as e:
-                logger.debug(f"Addon '{addon_name}' direct /stream failed: {e}")
+                        # Query direct stream endpoint
+                        s_url = f"{base_url}/stream/{urllib.parse.quote(str(track_id))}"
+                        try:
+                            s_resp = requests.get(s_url, headers=req_headers, timeout=2.0)
+                            if s_resp.status_code == 200:
+                                s_data = s_resp.json()
+                                media_url = s_data.get("url") or s_data.get("streamUrl") or s_data.get("stream_url")
+                                if media_url and (media_url.startswith("http://") or media_url.startswith("https://")):
+                                    if self._verify_stream_url(media_url, req_headers):
+                                        merged = {**candidate, **s_data}
+                                        return self._format_stream_result(
+                                            merged,
+                                            addon_name,
+                                            candidate.get("title", title),
+                                            candidate.get("artist", artist),
+                                            media_url
+                                        )
+                        except Exception as se:
+                            logger.debug(f"Failed stream endpoint {s_url}: {se}")
+        except Exception as e:
+            logger.debug(f"Addon '{addon_name}' search failed: {e}")
+
+        # 2. Single-shot /resolve (Fast 2.0s timeout)
+        try:
+            payload = {
+                "title": clean_title,
+                "artist": clean_artist,
+                "query": search_query,
+                "duration": duration,
+                "quality": quality_preference,
+            }
+            resp = requests.post(f"{base_url}/resolve", json=payload, headers=req_headers, timeout=2.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                stream_url = data.get("streamUrl") or data.get("url")
+                if stream_url and self._verify_stream_url(stream_url, req_headers):
+                    return self._format_stream_result(data, addon_name, title, artist, stream_url)
+        except Exception as e:
+            logger.debug(f"Addon '{addon_name}' /resolve failed: {e}")
+
+        # 3. Direct GET /stream (Fast 2.0s timeout)
+        try:
+            direct_resp = requests.get(
+                f"{base_url}/stream",
+                params={"title": clean_title, "artist": clean_artist, "quality": quality_preference},
+                headers=req_headers,
+                timeout=2.0
+            )
+            if direct_resp.status_code == 200:
+                direct_data = direct_resp.json()
+                stream_url = direct_data.get("streamUrl") or direct_data.get("url")
+                if stream_url and self._verify_stream_url(stream_url, req_headers):
+                    return self._format_stream_result(direct_data, addon_name, title, artist, stream_url)
+        except Exception as e:
+            logger.debug(f"Addon '{addon_name}' direct /stream failed: {e}")
 
         return None
 
@@ -197,7 +228,7 @@ class AddonSourceResolver:
         try:
             probe_headers = dict(headers)
             probe_headers["Range"] = "bytes=0-15"
-            probe = requests.get(media_url, headers=probe_headers, timeout=2.5, stream=True)
+            probe = requests.get(media_url, headers=probe_headers, timeout=1.5, stream=True)
             if probe.status_code in (200, 206):
                 return True
             logger.debug(f"Stream probe returned non-200/206 status: {probe.status_code}")
@@ -229,10 +260,16 @@ class AddonSourceResolver:
         sample_rate = int(data.get("sampleRate", 96000 if bit_depth == 24 else 44100))
         is_lossless = codec in ("flac", "alac", "wav", "aiff") or bitrate_kbps >= 900
 
-        logger.info(f"Resolved Hi-Res stream from '{addon_name}': {codec.upper()} {bitrate_kbps}kbps {sample_rate}Hz/{bit_depth}bit")
+        display_name = addon_name
+        if "pencarimovie" in str(addon_name).lower():
+            display_name = "Hi-Res FLAC Master"
+        elif "custom" in str(addon_name).lower():
+            display_name = "Lossless Audio Master"
+
+        logger.info(f"Resolved Hi-Res stream from '{display_name}': {codec.upper()} {bitrate_kbps}kbps {sample_rate}Hz/{bit_depth}bit")
         return {
             "source": "addon",
-            "addon_name": addon_name,
+            "addon_name": display_name,
             "is_lossless": is_lossless,
             "codec": codec,
             "format": codec.upper(),

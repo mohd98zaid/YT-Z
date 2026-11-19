@@ -35,10 +35,17 @@ from backend.core.config import ConfigManager
 logger = logging.getLogger("YTZ.Downloader")
 
 class DownloaderEngine:
-    def __init__(self, db: DatabaseManager, config: ConfigManager, broadcast_fn: Optional[Callable[[Dict[str, Any]], None]] = None):
+    def __init__(
+        self,
+        db: DatabaseManager,
+        config: ConfigManager,
+        broadcast_fn: Optional[Callable[[Dict[str, Any]], None]] = None,
+        stream_resolver: Any = None
+    ):
         self.db = db
         self.config = config
         self.broadcast_fn = broadcast_fn
+        self.stream_resolver = stream_resolver
         self.max_workers = int(config.get("concurrent_downloads", 3))
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="YTZ_Worker")
         self.active_tasks: Dict[str, Any] = {}
@@ -195,6 +202,38 @@ class DownloaderEngine:
         download_dir.mkdir(parents=True, exist_ok=True)
         out_template = str(download_dir / "%(title)s [%(id)s].%(ext)s")
 
+        existing_info = self.db.get_download(task_id) or {}
+        item_title = existing_info.get("title") or ""
+        item_artist = existing_info.get("artist") or ""
+
+        download_url = url
+        # Download at original audio which is playing (Lossless FLAC Master resolution)
+        if download_type == "audio" and (output_format == "flac" or quality in ("lossless", "original", "flac")) and self.stream_resolver:
+            video_id = None
+            if "watch?v=" in url:
+                video_id = url.split("watch?v=")[1].split("&")[0]
+            elif "youtu.be/" in url:
+                video_id = url.split("youtu.be/")[1].split("?")[0]
+            elif len(url) == 11 and not url.startswith("http"):
+                video_id = url
+
+            if video_id:
+                try:
+                    resolved = self.stream_resolver.resolve_audio(
+                        video_id=video_id,
+                        title=item_title,
+                        artist=item_artist,
+                        quality="lossless"
+                    )
+                    if resolved and resolved.get("isLossless") and resolved.get("streamUrl"):
+                        s_target = resolved["streamUrl"]
+                        if s_target.startswith("http://") or s_target.startswith("https://"):
+                            download_url = s_target
+                            output_format = "flac"
+                            logger.info(f"Targeting original Hi-Res FLAC master stream for download: {s_target[:60]}...")
+                except Exception as ex:
+                    logger.warning(f"Could not resolve direct lossless stream for download: {ex}")
+
         ydl_opts: Dict[str, Any] = {
             'outtmpl': out_template,
             'progress_hooks': [lambda d: self._progress_hook(d, task_id)],
@@ -246,9 +285,9 @@ class DownloaderEngine:
         try:
             self.db.update_download(task_id, {"status": "downloading"})
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                title = info.get("title", "Downloaded Media")
-                artist = info.get("uploader") or info.get("artist") or ""
+                info = ydl.extract_info(download_url, download=True)
+                title = info.get("title") or item_title or "Downloaded Media"
+                artist = info.get("uploader") or info.get("artist") or item_artist or ""
                 thumbnail = info.get("thumbnail") or ""
                 duration = info.get("duration") or 0
 

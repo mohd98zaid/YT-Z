@@ -5,6 +5,7 @@ and fetches SponsorBlock skip segments for seamless music listening.
 """
 import time
 import logging
+import threading
 from typing import Dict, Any, Optional, List
 import requests
 import yt_dlp
@@ -15,6 +16,10 @@ logger = logging.getLogger("YTZ.Stream")
 # In-memory stream cache: { video_id: { url: str, expires_at: float, info: dict } }
 _STREAM_CACHE: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL = 3600 * 3  # 3 hours (YouTube stream URLs are valid for ~6 hours)
+
+_INFLIGHT_RESOLUTIONS: Dict[str, threading.Event] = {}
+_INFLIGHT_RESULTS: Dict[str, Any] = {}
+_RESOLVE_LOCK = threading.Lock()
 
 class StreamResolver:
     def __init__(self, addon_resolver: Optional[AddonSourceResolver] = None):
@@ -36,15 +41,47 @@ class StreamResolver:
         quality: str = "auto"
     ) -> Optional[Dict[str, Any]]:
         """
-        Resolve highest quality audio stream for a track.
+        Resolve highest quality audio stream for a track with in-flight deduplication.
         Prioritizes configured Hi-Res Lossless (FLAC/ALAC) add-ons,
         falling back gracefully to YouTube Music Opus.
         """
         now = time.time()
         cache_key = f"{video_id}_{quality}"
-        cached = _STREAM_CACHE.get(cache_key)
-        if cached and cached.get("expires_at", 0) > now:
-            return cached["data"]
+        with _RESOLVE_LOCK:
+            cached = _STREAM_CACHE.get(cache_key)
+            if cached and cached.get("expires_at", 0) > now:
+                return cached["data"]
+            if cache_key in _INFLIGHT_RESOLUTIONS:
+                event = _INFLIGHT_RESOLUTIONS[cache_key]
+                is_leader = False
+            else:
+                event = threading.Event()
+                _INFLIGHT_RESOLUTIONS[cache_key] = event
+                is_leader = True
+
+        if not is_leader:
+            event.wait(timeout=10.0)
+            return _INFLIGHT_RESULTS.get(cache_key)
+
+        try:
+            result = self._do_resolve_audio(video_id, title, artist, duration, quality)
+            _INFLIGHT_RESULTS[cache_key] = result
+            return result
+        finally:
+            with _RESOLVE_LOCK:
+                _INFLIGHT_RESOLUTIONS.pop(cache_key, None)
+                event.set()
+
+    def _do_resolve_audio(
+        self,
+        video_id: str,
+        title: str = "",
+        artist: str = "",
+        duration: int = 0,
+        quality: str = "auto"
+    ) -> Optional[Dict[str, Any]]:
+        now = time.time()
+        cache_key = f"{video_id}_{quality}"
 
         # 1. Check enabled Lossless Module Source Add-ons
         if self.addon_resolver and quality in ("lossless", "high", "auto") and title:

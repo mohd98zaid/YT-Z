@@ -141,9 +141,19 @@ class DatabaseManager:
                 name TEXT NOT NULL,
                 description TEXT,
                 thumbnail TEXT,
+                is_custom_thumbnail INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """)
+
+            # Ensure is_custom_thumbnail column exists for existing databases
+            try:
+                cursor.execute("ALTER TABLE custom_playlists ADD COLUMN is_custom_thumbnail INTEGER DEFAULT 0")
+            except Exception:
+                pass
+
+            # Clean up any legacy dummy test thumbnail
+            cursor.execute("UPDATE custom_playlists SET thumbnail = '', is_custom_thumbnail = 0 WHERE thumbnail LIKE '%googleusercontent.com/test%'")
 
             # Custom Playlist Tracks table
             cursor.execute("""
@@ -445,32 +455,69 @@ class DatabaseManager:
 
     def create_custom_playlist(self, name: str, description: str = "", thumbnail: str = "") -> Dict[str, Any]:
         p_id = f"pl_{int(time.time() * 1000)}"
+        clean_thumb = thumbnail.strip()
+        is_custom = 1 if clean_thumb else 0
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-            INSERT INTO custom_playlists (id, name, description, thumbnail)
-            VALUES (?, ?, ?, ?)
-            """, (p_id, name, description, thumbnail))
+            INSERT INTO custom_playlists (id, name, description, thumbnail, is_custom_thumbnail)
+            VALUES (?, ?, ?, ?, ?)
+            """, (p_id, name.strip(), description.strip(), clean_thumb, is_custom))
             conn.commit()
-        return {"id": p_id, "name": name, "description": description, "thumbnail": thumbnail, "trackCount": 0}
+        return {"id": p_id, "name": name, "description": description, "thumbnail": clean_thumb, "is_custom_thumbnail": is_custom, "trackCount": 0}
+
+    def update_custom_playlist(self, playlist_id: str, name: Optional[str] = None, description: Optional[str] = None, thumbnail: Optional[str] = None) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if name is not None:
+                cursor.execute("UPDATE custom_playlists SET name = ? WHERE id = ?", (name.strip(), playlist_id))
+            if description is not None:
+                cursor.execute("UPDATE custom_playlists SET description = ? WHERE id = ?", (description.strip(), playlist_id))
+            if thumbnail is not None:
+                clean_thumb = thumbnail.strip()
+                if clean_thumb:
+                    cursor.execute("UPDATE custom_playlists SET thumbnail = ?, is_custom_thumbnail = 1 WHERE id = ?", (clean_thumb, playlist_id))
+                else:
+                    # User cleared custom cover; reset to first song's thumbnail
+                    cursor.execute("""
+                    SELECT thumbnail FROM custom_playlist_tracks 
+                    WHERE playlist_id = ? AND thumbnail IS NOT NULL AND thumbnail != '' 
+                    ORDER BY id ASC LIMIT 1
+                    """, (playlist_id,))
+                    row = cursor.fetchone()
+                    first_thumb = row[0] if row else ""
+                    cursor.execute("UPDATE custom_playlists SET thumbnail = ?, is_custom_thumbnail = 0 WHERE id = ?", (first_thumb, playlist_id))
+            conn.commit()
 
     def get_custom_playlists(self) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-            SELECT p.id, p.name, p.description, p.thumbnail, p.created_at,
-                   COUNT(t.id) as trackCount
+            SELECT p.id, p.name, p.description, p.thumbnail, p.is_custom_thumbnail, p.created_at,
+                   COUNT(t.id) as trackCount,
+                   (SELECT t2.thumbnail FROM custom_playlist_tracks t2 
+                    WHERE t2.playlist_id = p.id AND t2.thumbnail IS NOT NULL AND t2.thumbnail != '' 
+                    ORDER BY t2.id ASC LIMIT 1) as firstTrackThumbnail
             FROM custom_playlists p
             LEFT JOIN custom_playlist_tracks t ON p.id = t.playlist_id
             GROUP BY p.id
             ORDER BY p.created_at DESC
             """)
-            return [dict(r) for r in cursor.fetchall()]
+            playlists = []
+            for r in cursor.fetchall():
+                d = dict(r)
+                thumb = d.get("thumbnail") or ""
+                first_thumb = d.get("firstTrackThumbnail") or ""
+                # If thumbnail is empty, dummy test URL, or not custom, fall back to first song's thumbnail
+                if not thumb or "googleusercontent.com/test" in thumb or (not d.get("is_custom_thumbnail") and first_thumb):
+                    d["thumbnail"] = first_thumb or (thumb if "googleusercontent.com/test" not in thumb else "")
+                playlists.append(d)
+            return playlists
 
     def get_custom_playlist_details(self, playlist_id: str) -> Optional[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name, description, thumbnail, created_at FROM custom_playlists WHERE id = ?", (playlist_id,))
+            cursor.execute("SELECT id, name, description, thumbnail, is_custom_thumbnail, created_at FROM custom_playlists WHERE id = ?", (playlist_id,))
             row = cursor.fetchone()
             if not row:
                 return None
@@ -481,8 +528,18 @@ class DatabaseManager:
             WHERE playlist_id = ?
             ORDER BY id ASC
             """, (playlist_id,))
-            pl["tracks"] = [dict(r) for r in cursor.fetchall()]
-            pl["trackCount"] = len(pl["tracks"])
+            tracks = [dict(r) for r in cursor.fetchall()]
+            pl["tracks"] = tracks
+            pl["trackCount"] = len(tracks)
+
+            # Fall back to first track's cover if no custom cover or if dummy URL
+            thumb = pl.get("thumbnail") or ""
+            if not thumb or "googleusercontent.com/test" in thumb or not pl.get("is_custom_thumbnail"):
+                for t in tracks:
+                    t_thumb = t.get("thumbnail")
+                    if t_thumb and t_thumb.strip():
+                        pl["thumbnail"] = t_thumb
+                        break
             return pl
 
     def delete_custom_playlist(self, playlist_id: str) -> None:
@@ -496,6 +553,7 @@ class DatabaseManager:
         t_id = track.get("id") or track.get("videoId")
         if not t_id:
             return
+        track_thumb = track.get("thumbnail", "")
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -504,18 +562,32 @@ class DatabaseManager:
             """, (
                 playlist_id, t_id, track.get("videoId", t_id),
                 track.get("title", "Track"), track.get("artist", ""),
-                track.get("album", ""), track.get("thumbnail", ""),
+                track.get("album", ""), track_thumb,
                 str(track.get("duration", "0:00")), int(track.get("durationSeconds", 0) or 0)
             ))
-            # Update thumbnail of playlist to first track thumbnail if none
-            cursor.execute("""
-            UPDATE custom_playlists SET thumbnail = ?
-            WHERE id = ? AND (thumbnail IS NULL OR thumbnail = '')
-            """, (track.get("thumbnail", ""), playlist_id))
+            # Automatically update thumbnail to first track thumbnail if playlist doesn't have a custom one
+            if track_thumb:
+                cursor.execute("""
+                UPDATE custom_playlists 
+                SET thumbnail = ?
+                WHERE id = ? AND (is_custom_thumbnail = 0 OR is_custom_thumbnail IS NULL OR thumbnail IS NULL OR thumbnail = '' OR thumbnail LIKE '%googleusercontent.com/test%')
+                """, (track_thumb, playlist_id))
             conn.commit()
 
     def remove_track_from_playlist(self, playlist_id: str, track_id: str) -> None:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM custom_playlist_tracks WHERE playlist_id = ? AND track_id = ?", (playlist_id, track_id))
+            # Re-sync thumbnail to next remaining track if not custom
+            cursor.execute("""
+            SELECT thumbnail FROM custom_playlist_tracks 
+            WHERE playlist_id = ? AND thumbnail IS NOT NULL AND thumbnail != '' 
+            ORDER BY id ASC LIMIT 1
+            """, (playlist_id,))
+            row = cursor.fetchone()
+            new_thumb = row[0] if row else ""
+            cursor.execute("""
+            UPDATE custom_playlists SET thumbnail = ? 
+            WHERE id = ? AND (is_custom_thumbnail = 0 OR is_custom_thumbnail IS NULL)
+            """, (new_thumb, playlist_id))
             conn.commit()

@@ -101,7 +101,7 @@ class WSManager:
                 self.disconnect(ws)
 
 ws_manager = WSManager()
-downloader_engine = DownloaderEngine(db_mgr, config_mgr, broadcast_fn=ws_manager.broadcast_sync)
+downloader_engine = DownloaderEngine(db_mgr, config_mgr, broadcast_fn=ws_manager.broadcast_sync, stream_resolver=stream_resolver)
 
 @app.on_event("startup")
 async def startup_event():
@@ -210,7 +210,7 @@ async def get_audio_stream(
     return stream_info
 
 @app.get("/api/stream/{video_id}/audio")
-def stream_audio_proxy(
+async def stream_audio_proxy(
     video_id: str,
     request: Request,
     title: Optional[str] = Query(""),
@@ -218,14 +218,18 @@ def stream_audio_proxy(
     quality: Optional[str] = Query("auto")
 ):
     """
-    Audio streaming proxy with HTTP 206 Partial Content Range support.
+    Audio streaming proxy with HTTP 206 Partial Content Range support and fast disconnection cleanup.
     Supports Lossless FLAC/ALAC add-on streams and YouTube Opus.
     """
-    stream_info = stream_resolver.resolve_audio(
-        video_id,
-        title=title,
-        artist=artist,
-        quality=quality
+    loop = asyncio.get_event_loop()
+    stream_info = await loop.run_in_executor(
+        None,
+        lambda: stream_resolver.resolve_audio(
+            video_id,
+            title=title,
+            artist=artist,
+            quality=quality
+        )
     )
     if not stream_info:
         raise HTTPException(status_code=404, detail="Could not resolve audio stream for track.")
@@ -242,7 +246,7 @@ def stream_audio_proxy(
         remote_headers["Range"] = range_header
 
     try:
-        resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=15)
+        resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=12)
         
         # Determine content type based on codec
         codec = str(stream_info.get("codec", "")).lower()
@@ -270,10 +274,16 @@ def stream_audio_proxy(
         if "Content-Length" in resp.headers:
             headers["Content-Length"] = resp.headers["Content-Length"]
 
-        def chunk_generator():
-            for chunk in resp.iter_content(chunk_size=64 * 1024):
-                if chunk:
-                    yield chunk
+        # Optimized 128KB chunk stream with instant client disconnect release
+        async def chunk_generator():
+            try:
+                for chunk in resp.iter_content(chunk_size=128 * 1024):
+                    if await request.is_disconnected():
+                        break
+                    if chunk:
+                        yield chunk
+            finally:
+                resp.close()
 
         return StreamingResponse(
             chunk_generator(),
@@ -595,6 +605,14 @@ def get_custom_playlist(playlist_id: str):
     if not pl:
         raise HTTPException(status_code=404, detail="Playlist not found")
     return pl
+
+@app.put("/api/playlists/custom/{playlist_id}")
+def update_custom_playlist(playlist_id: str, payload: Dict[str, Any] = Body(...)):
+    name = payload.get("name")
+    desc = payload.get("description")
+    thumb = payload.get("thumbnail")
+    db_mgr.update_custom_playlist(playlist_id, name=name, description=desc, thumbnail=thumb)
+    return {"status": "ok"}
 
 @app.delete("/api/playlists/custom/{playlist_id}")
 def delete_custom_playlist(playlist_id: str):
