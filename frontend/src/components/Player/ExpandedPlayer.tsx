@@ -277,7 +277,7 @@ export const ExpandedPlayer: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background select-none overflow-hidden animate-fadeIn">
+    <div className="fixed inset-0 z-[500] flex flex-col bg-background select-none overflow-hidden animate-fadeIn">
       {/* Apple Music Fluid Ambient Mesh Visualizer */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
         {/* Layer 1: Blurred Album Cover Base */}

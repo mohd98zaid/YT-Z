@@ -56,7 +56,24 @@ class YTMusicService:
                         artist_id = a.get("id")
                 elif isinstance(a, str):
                     artist_names.append(a)
-        artist_str = ", ".join(artist_names) if artist_names else (item.get("author") or "Unknown Artist")
+
+        # Check author field if artist_names is empty
+        author_val = item.get("author") or item.get("uploader")
+        if not artist_names and author_val:
+            if isinstance(author_val, str):
+                artist_names.append(author_val)
+            elif isinstance(author_val, dict):
+                n = author_val.get("name")
+                if n:
+                    artist_names.append(n)
+            elif isinstance(author_val, list):
+                for a in author_val:
+                    if isinstance(a, dict) and a.get("name"):
+                        artist_names.append(a["name"])
+                    elif isinstance(a, str):
+                        artist_names.append(a)
+
+        artist_str = ", ".join(artist_names) if artist_names else "YouTube Music"
 
         # Extract album
         album_data = item.get("album")
@@ -313,22 +330,61 @@ class YTMusicService:
                     track["resultType"] = cat
                     items.append(track)
                 elif cat == "artist":
+                    artist_title = item.get("artist") or item.get("title", "")
+                    artist_id = item.get("browseId") or ""
+                    if (not artist_title or not artist_id) and item.get("artists"):
+                        raw_a = item["artists"]
+                        if isinstance(raw_a, list) and len(raw_a) > 0:
+                            first_a = raw_a[0]
+                            if isinstance(first_a, dict):
+                                if not artist_title:
+                                    artist_title = first_a.get("name", "")
+                                if not artist_id:
+                                    artist_id = first_a.get("id", "")
+                            elif isinstance(first_a, str) and not artist_title:
+                                artist_title = first_a
+
                     items.append({
-                        "id": item.get("browseId"),
+                        "id": artist_id,
+                        "browseId": artist_id,
                         "resultType": "artist",
-                        "title": item.get("artist") or item.get("title", ""),
+                        "title": artist_title or query.strip(),
                         "thumbnail": self._normalize_thumbnail(item.get("thumbnails")),
-                        "subscribers": item.get("subscribers", "")
+                        "subscribers": str(item.get("subscribers") or "")
                     })
                 elif cat in ("album", "playlist"):
+                    album_title = item.get("title", "")
+                    if isinstance(album_title, dict):
+                        album_title = album_title.get("text", "")
+
+                    raw_artists = item.get("artists", [])
+                    artist_names = []
+                    if isinstance(raw_artists, list):
+                        for a in raw_artists:
+                            if isinstance(a, dict):
+                                name = a.get("name")
+                                if name:
+                                    artist_names.append(name)
+                            elif isinstance(a, str):
+                                artist_names.append(a)
+
+                    author_field = item.get("author")
+                    if isinstance(author_field, dict):
+                        author_field = author_field.get("name", "")
+                    elif isinstance(author_field, list):
+                        author_field = ", ".join([x.get("name", "") if isinstance(x, dict) else str(x) for x in author_field])
+
+                    artist_str = ", ".join(artist_names) if artist_names else (str(author_field) if author_field else "YouTube Music")
+
                     items.append({
-                        "id": item.get("browseId") or item.get("playlistId"),
+                        "id": item.get("browseId") or item.get("playlistId") or "",
+                        "browseId": item.get("browseId") or item.get("playlistId") or "",
                         "resultType": cat,
-                        "title": item.get("title", ""),
-                        "artist": ", ".join([a.get("name", "") for a in item.get("artists", [])]) if item.get("artists") else (item.get("author") or ""),
-                        "year": item.get("year", ""),
+                        "title": album_title or "Untitled Collection",
+                        "artist": artist_str,
+                        "year": str(item.get("year") or ""),
                         "thumbnail": self._normalize_thumbnail(item.get("thumbnails")),
-                        "itemCount": item.get("itemCount", "")
+                        "itemCount": str(item.get("itemCount") or "")
                     })
             return items
         except Exception as e:
