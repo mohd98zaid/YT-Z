@@ -330,8 +330,8 @@ class AddonSourceResolver:
         is_lossless = codec in ("flac", "alac", "wav", "aiff") or bitrate_kbps >= 900
 
         display_name = addon_name
-        if "pencarimovie" in str(addon_name).lower():
-            display_name = "Hi-Res FLAC Master"
+        if "pencarimovie" in str(addon_name).lower() or "pencari" in str(addon_name).lower():
+            display_name = "PencariMusic"
         elif "custom" in str(addon_name).lower():
             display_name = "Lossless Audio Master"
 
