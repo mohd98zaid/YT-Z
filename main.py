@@ -24,6 +24,18 @@ logger = logging.getLogger("YTZ.Launcher")
 PORT = 47892
 APP_URL = f"http://127.0.0.1:{PORT}"
 
+def get_lan_ip() -> str:
+    """Detects primary local network IP address on current Wi-Fi/Ethernet interface"""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
 def is_server_running() -> bool:
     try:
         r = requests.get(f"{APP_URL}/api/status", timeout=0.8)
@@ -32,10 +44,10 @@ def is_server_running() -> bool:
         return False
 
 def start_backend():
-    """Starts the FastAPI backend using Uvicorn"""
+    """Starts the FastAPI backend using Uvicorn on 0.0.0.0 to enable LAN / multi-device access"""
     from backend.server import app
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
 
 def wait_for_server(timeout: int = 15) -> bool:
     start_time = time.time()
@@ -100,16 +112,19 @@ def patch_edgechromium_fullscreen():
         logger.debug(f"EdgeChromium patch note: {e}")
 
 def main():
+    lan_ip = get_lan_ip()
+    lan_url = f"http://{lan_ip}:{PORT}"
+
     print("=" * 65)
-    print("           YT-Z: Ultimate YouTube Music & Downloader")
+    print("           YT-Z: Ultimate YouTube Music & Streaming Server")
     print("             High-Fidelity Audio & 4K Engine")
     print("=" * 65)
 
     # 1. Check if backend is already running
     if is_server_running():
-        print(f"[✓] Core backend is already running on {APP_URL}")
+        print(f"[✓] Core backend is already running.")
     else:
-        print(f"[*] Starting core backend service on {APP_URL}...")
+        print(f"[*] Starting core backend service on 0.0.0.0:{PORT}...")
         backend_thread = threading.Thread(target=start_backend, daemon=True)
         backend_thread.start()
 
@@ -117,6 +132,24 @@ def main():
             print("[!] Server failed to start within timeout.")
             sys.exit(1)
         print(f"[✓] Core engine online!")
+
+    print("-" * 65)
+    print(f"  [✓] Local access:   {APP_URL}")
+    print(f"  [✓] Network access: {lan_url}  (Any phone/device on Wi-Fi)")
+    print("-" * 65)
+
+    # Check for server-only / headless LAN media server mode
+    server_only = any(arg in sys.argv for arg in ["--server-only", "--server", "--headless", "--no-ui", "-s"])
+    if server_only:
+        print("\n[*] Running in LAN Media Server mode (Headless).")
+        print(f"[*] Open {lan_url} on your Phone, Tablet, Laptop, or TV to stream.")
+        print("[*] Press Ctrl+C to stop the server.\n")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[*] Shutting down YT-Z server...")
+            return
 
     # 2. Check launch mode
     force_browser = "--browser" in sys.argv or "-b" in sys.argv

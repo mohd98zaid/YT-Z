@@ -12,7 +12,10 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+# User data & downloads
 downloads/
+data/
+exports/
 eggs/
 .eggs/
 lib/
@@ -71,7 +74,10 @@ dist-ssr/
 *.db
 *.db-shm
 *.db-wal
+# User data & downloads
 downloads/
+data/
+exports/
 .cache/
 
 # ------ Environment & Secrets --------------------------------

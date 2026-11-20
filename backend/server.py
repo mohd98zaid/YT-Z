@@ -44,20 +44,12 @@ logger = logging.getLogger("YTZ.Server")
 
 app = FastAPI(title="YT-Z Desktop Core Engine", version="1.0.0")
 
-# CORS middleware for local frontend
+# CORS middleware for local frontend and LAN / mobile devices
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:5174",
-        "http://localhost:5174",
-        "http://127.0.0.1:47892",
-        "http://localhost:47892",
-        "tauri://localhost",
-        "http://tauri.localhost",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_origin_regex=".*",
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -108,7 +100,29 @@ async def startup_event():
     ws_manager.loop = asyncio.get_running_loop()
     logger.info("YT-Z Server started successfully on port 47892.")
 
+def get_lan_ip() -> str:
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
 # ==================== System & Config Endpoints ====================
+
+@app.get("/api/network-info")
+async def get_network_info():
+    lan_ip = get_lan_ip()
+    port = config_mgr.get("server_port", 47892)
+    return {
+        "local_ip": lan_ip,
+        "port": port,
+        "local_url": f"http://127.0.0.1:{port}",
+        "lan_url": f"http://{lan_ip}:{port}",
+    }
 
 @app.get("/api/status")
 async def get_status():
@@ -788,9 +802,21 @@ DIST_DIR = ROOT_DIR / "frontend" / "dist"
 if DIST_DIR.exists():
     app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="frontend")
 
-def run_server(port: int = 47892):
-    uvicorn.run("backend.server:app", host="127.0.0.1", port=port, log_level="info")
+def run_server(host: str = "0.0.0.0", port: int = 47892):
+    lan_ip = get_lan_ip()
+    print("=" * 65)
+    print("           YT-Z: High-Fidelity Audio & Streaming Engine")
+    print("=" * 65)
+    print(f" [✓] Local access:   http://127.0.0.1:{port}")
+    print(f" [✓] Network access: http://{lan_ip}:{port} (Any device on Wi-Fi/LAN)")
+    print("=" * 65)
+    uvicorn.run("backend.server:app", host=host, port=port, log_level="info")
 
 if __name__ == "__main__":
-    run_server()
+    import argparse
+    parser = argparse.ArgumentParser(description="YT-Z Server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host interface (0.0.0.0 to listen on all interfaces)")
+    parser.add_argument("--port", type=int, default=47892, help="Port to listen on")
+    args = parser.parse_args()
+    run_server(host=args.host, port=args.port)
 
