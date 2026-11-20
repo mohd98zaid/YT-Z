@@ -134,7 +134,10 @@ def main():
                 min_size=(960, 640),
                 background_color="#0a0a0c"
             )
-            webview.start(debug=False)
+            # Ensure persistent storage for localStorage, cookies, session across restarts
+            storage_dir = Path.home() / ".ytz" / "webview_data"
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            webview.start(debug=False, private_mode=False, storage_path=str(storage_dir))
             return
         except Exception as e:
             print(f"[!] Native window note: {e}")

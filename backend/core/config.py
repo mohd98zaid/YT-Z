@@ -35,6 +35,19 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "lyrics_provider_preference": "auto",
     "discord_rpc_enabled": True,
     "notifications_enabled": True,
+    "active_tab": "home",
+    "current_track": None,
+    "queue": [],
+    "queue_index": -1,
+    "current_time": 0.0,
+    "audio_quality": "lossless",
+    "repeat_mode": "off",
+    "shuffle": False,
+    "is_muted": False,
+    "eq_enabled": True,
+    "skip_silence": False,
+    "volume_normalization": False,
+    "audio_stats": None,
 }
 
 class ConfigManager:

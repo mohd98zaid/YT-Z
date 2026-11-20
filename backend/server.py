@@ -129,6 +129,15 @@ async def update_config(payload: Dict[str, Any] = Body(...)):
     updated = config_mgr.update(payload)
     return {"status": "ok", "config": updated}
 
+@app.get("/api/session")
+async def get_session():
+    return config_mgr.all()
+
+@app.post("/api/session")
+async def update_session(payload: Dict[str, Any] = Body(...)):
+    updated = config_mgr.update(payload)
+    return {"status": "ok", "session": updated}
+
 # ==================== YouTube Music Discovery ====================
 
 @app.get("/api/ytm/home")
