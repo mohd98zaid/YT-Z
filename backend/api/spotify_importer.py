@@ -6,15 +6,18 @@ against YouTube Music to enable instant streaming or 1-click batch downloading.
 import re
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Optional
 import requests
 from backend.api.ytmusic import YTMusicService
+from backend.core.database import DatabaseManager
 
 logger = logging.getLogger("YTZ.SpotifyImporter")
 
 class SpotifyImporter:
-    def __init__(self, ytmusic_service: YTMusicService):
+    def __init__(self, ytmusic_service: YTMusicService, db: Optional[DatabaseManager] = None):
         self.yt = ytmusic_service
+        self.db = db
 
     def extract_spotify_id(self, url_or_uri: str) -> Dict[str, str]:
         """Extract type ('playlist', 'album', 'track') and ID from Spotify link"""
@@ -95,26 +98,33 @@ class SpotifyImporter:
 
     def match_track_on_ytmusic(self, title: str, artist: str) -> Optional[Dict[str, Any]]:
         """Search YouTube Music for the best matching track"""
-        query = f"{title} {artist}".strip()
+        clean_title = title.replace("\xa0", " ").strip()
+        clean_artist = artist.replace("\xa0", " ").split(",")[0].split("&")[0].strip()
+        query = f"{clean_title} {clean_artist}".strip()
         results = self.yt.search(query, filter_type="songs")
         if results:
             return results[0]
         # Fallback without artist filter or general search
-        results = self.yt.search(query)
+        results = self.yt.search(f"{clean_title} {artist}".strip())
         if results:
             return results[0]
         return None
 
-    def import_and_match(self, spotify_url: str, limit: int = 50) -> Dict[str, Any]:
-        """Import playlist from Spotify and resolve tracks against YouTube Music"""
+    def import_and_match(
+        self,
+        spotify_url: str,
+        limit: int = 150,
+        save_to_library: bool = True
+    ) -> Dict[str, Any]:
+        """Import playlist from Spotify, match tracks concurrently, and auto-save to My Playlists"""
         spotify_data = self.fetch_spotify_tracks(spotify_url)
         tracks = spotify_data.get("tracks", [])[:limit]
-        
-        matched_tracks = []
-        for t in tracks:
+
+        # Parallelize YouTube Music matching for speed (8 concurrent workers)
+        def _match_single(idx: int, t: Dict[str, Any]) -> tuple:
             match = self.match_track_on_ytmusic(t["title"], t["artist"])
             if match:
-                matched_tracks.append({
+                return idx, {
                     "spotifyTitle": t["title"],
                     "spotifyArtist": t["artist"],
                     "videoId": match["id"],
@@ -125,9 +135,9 @@ class SpotifyImporter:
                     "duration": match.get("duration", "0:00"),
                     "durationSeconds": match.get("durationSeconds", t["duration"]),
                     "matched": True
-                })
+                }
             else:
-                matched_tracks.append({
+                return idx, {
                     "spotifyTitle": t["title"],
                     "spotifyArtist": t["artist"],
                     "videoId": "",
@@ -138,7 +148,56 @@ class SpotifyImporter:
                     "duration": "0:00",
                     "durationSeconds": t["duration"],
                     "matched": False
-                })
+                }
+
+        matched_tracks_indexed = []
+        with ThreadPoolExecutor(max_workers=min(8, max(2, len(tracks)))) as executor:
+            futures = [executor.submit(_match_single, idx, t) for idx, t in enumerate(tracks)]
+            for fut in futures:
+                try:
+                    matched_tracks_indexed.append(fut.result())
+                except Exception as e:
+                    logger.debug(f"Track match error: {e}")
+
+        # Sort back to preserve original Spotify playlist sequence
+        matched_tracks_indexed.sort(key=lambda x: x[0])
+        matched_tracks = [x[1] for x in matched_tracks_indexed]
+
+        # Auto-save playlist into custom_playlists if requested and database is available
+        saved_playlist_id = None
+        if save_to_library and self.db:
+            try:
+                playlist_title = spotify_data["title"]
+                cover_art = spotify_data.get("coverArt", "")
+                
+                # Check if a custom playlist with this name already exists
+                existing_pls = self.db.get_custom_playlists()
+                target_pl = next(
+                    (p for p in existing_pls if p.get("name", "").strip().lower() == playlist_title.strip().lower()),
+                    None
+                )
+
+                if target_pl:
+                    saved_playlist_id = target_pl["id"]
+                    # Optionally update thumbnail if not set
+                    if not target_pl.get("thumbnail") and cover_art:
+                        self.db.update_custom_playlist(saved_playlist_id, thumbnail=cover_art)
+                else:
+                    new_pl = self.db.create_custom_playlist(
+                        name=playlist_title,
+                        description=f"Imported from Spotify ({spotify_data.get('subtitle', '')})".strip(),
+                        thumbnail=cover_art
+                    )
+                    saved_playlist_id = new_pl["id"]
+
+                # Add all matched tracks to custom playlist
+                for m in matched_tracks:
+                    if m.get("matched") and m.get("videoId"):
+                        self.db.add_track_to_playlist(saved_playlist_id, m)
+
+                logger.info(f"Auto-saved Spotify playlist '{playlist_title}' to My Playlists (ID: {saved_playlist_id}) with {len(matched_tracks)} tracks.")
+            except Exception as save_err:
+                logger.error(f"Failed to auto-save imported Spotify playlist: {save_err}")
 
         return {
             "title": spotify_data["title"],
@@ -146,5 +205,7 @@ class SpotifyImporter:
             "coverArt": spotify_data["coverArt"],
             "totalTracks": len(tracks),
             "matchedCount": sum(1 for m in matched_tracks if m["matched"]),
-            "tracks": matched_tracks
+            "tracks": matched_tracks,
+            "playlistId": saved_playlist_id,
+            "savedToLibrary": bool(saved_playlist_id)
         }

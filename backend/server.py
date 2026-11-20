@@ -492,16 +492,17 @@ async def clear_completed_downloads():
 
 # ==================== Spotify Importer Endpoints ====================
 
-spotify_importer = SpotifyImporter(ytmusic_svc)
+spotify_importer = SpotifyImporter(ytmusic_svc, db=db_mgr)
 
 class SpotifyImportRequest(BaseModel):
     url: str
-    limit: int = 50
+    limit: int = 150
+    save_to_library: bool = True
 
 @app.post("/api/spotify/import")
 async def import_spotify(req: SpotifyImportRequest):
     try:
-        return spotify_importer.import_and_match(req.url, limit=req.limit)
+        return spotify_importer.import_and_match(req.url, limit=req.limit, save_to_library=req.save_to_library)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
