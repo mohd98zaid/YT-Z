@@ -457,19 +457,19 @@ export const MiniPlayer: React.FC = () => {
           {qualityMenuOpen && (
             <div 
               style={{ backgroundColor: 'var(--bg-surface)' }}
-              className="absolute right-0 bottom-full mb-3 w-80 bg-surface border-2 border-border/90 rounded-2xl p-2.5 shadow-[0_20px_50px_rgba(0,0,0,0.65)] z-50 animate-fadeIn space-y-1.5"
+              className="absolute right-0 bottom-full mb-3 w-84 bg-surface border border-border/80 rounded-2xl p-3 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-50 animate-fadeIn space-y-1.5 ring-1 ring-black/10 dark:ring-white/10"
             >
-              <div className="px-3 py-2 border-b border-border/40 mb-1">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-foreground">Streaming Quality</p>
-                  <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-surface-elevated text-foreground-muted border border-border">
-                    {audioQuality.replace('_', ' ')}
-                  </span>
+              <div className="flex items-center justify-between pb-2 border-b border-border/60 mb-2">
+                <div>
+                  <p className="text-xs font-extrabold text-foreground tracking-tight">Streaming Quality</p>
+                  <p className="text-[10px] text-foreground-muted">Select audio fidelity or data saver</p>
                 </div>
-                <p className="text-[11px] text-foreground-muted">Select audio fidelity or data saver</p>
+                <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
+                  {audioQuality.replace('_', ' ')}
+                </span>
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {[
                   {
                     id: 'lossless',
@@ -477,7 +477,7 @@ export const MiniPlayer: React.FC = () => {
                     badge: 'FLAC 24-bit',
                     desc: 'Bit-perfect audiophile stream up to 96kHz / 1411k+',
                     icon: Sparkles,
-                    color: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+                    color: 'text-amber-500 bg-amber-500/10 border-amber-500/30',
                   },
                   {
                     id: 'high',
@@ -493,7 +493,7 @@ export const MiniPlayer: React.FC = () => {
                     badge: '128k–160k',
                     desc: 'Balanced audio fidelity with smooth buffering',
                     icon: Gauge,
-                    color: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
+                    color: 'text-blue-500 bg-blue-500/10 border-blue-500/30',
                   },
                   {
                     id: 'data_saver',
@@ -501,7 +501,7 @@ export const MiniPlayer: React.FC = () => {
                     badge: '48k–70k',
                     desc: 'Uses 70%+ less data — ideal for mobile & metered data',
                     icon: Leaf,
-                    color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+                    color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30',
                   },
                   {
                     id: 'auto',
@@ -509,7 +509,7 @@ export const MiniPlayer: React.FC = () => {
                     badge: 'Auto',
                     desc: 'Optimized dynamically based on track and connection',
                     icon: RefreshCw,
-                    color: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
+                    color: 'text-purple-500 bg-purple-500/10 border-purple-500/30',
                   },
                 ].map((opt) => {
                   const isSelected = audioQuality === opt.id;
@@ -521,27 +521,29 @@ export const MiniPlayer: React.FC = () => {
                         setAudioQuality(opt.id as any);
                         setQualityMenuOpen(false);
                       }}
-                      className={`w-full flex items-start gap-2.5 p-2 rounded-xl text-left transition-all ${
+                      className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all border ${
                         isSelected
-                          ? 'bg-primary/20 border border-primary/40 text-foreground'
-                          : 'hover:bg-surface-elevated text-foreground-muted hover:text-foreground border border-transparent'
+                          ? 'bg-primary/15 border-primary/50 text-foreground shadow-sm shadow-primary/10'
+                          : 'bg-surface-elevated/60 hover:bg-surface-elevated border-border/40 hover:border-border text-foreground-muted hover:text-foreground'
                       }`}
                     >
-                      <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${opt.color}`}>
-                        <OptIcon className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className={`text-xs font-bold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
-                            {opt.label}
-                          </span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface-elevated text-foreground-subtle border border-border/40">
-                            {opt.badge}
-                          </span>
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                        <div className={`p-1.5 rounded-lg shrink-0 border ${opt.color}`}>
+                          <OptIcon className="w-4 h-4" />
                         </div>
-                        <p className="text-[10px] text-foreground-muted leading-tight mt-0.5">{opt.desc}</p>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-xs font-bold truncate ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                              {opt.label}
+                            </span>
+                            {isSelected && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+                          </div>
+                          <p className="text-[10px] text-foreground-muted truncate leading-tight mt-0.5">{opt.desc}</p>
+                        </div>
                       </div>
-                      {isSelected && <Check className="w-4 h-4 text-primary shrink-0 self-center" />}
+                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-surface border border-border/70 text-foreground shrink-0 shadow-xs">
+                        {opt.badge}
+                      </span>
                     </button>
                   );
                 })}

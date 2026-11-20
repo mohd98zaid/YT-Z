@@ -578,19 +578,19 @@ export const ExpandedPlayer: React.FC = () => {
             {qualityMenuOpen && (
               <div 
                 style={{ backgroundColor: 'var(--bg-surface)' }}
-                className="absolute right-0 top-full mt-2 w-80 bg-surface border-2 border-border/90 rounded-2xl p-2.5 shadow-[0_20px_50px_rgba(0,0,0,0.65)] z-50 animate-fadeIn space-y-1.5"
+                className="absolute right-0 top-full mt-2 w-84 bg-surface border border-border/80 rounded-2xl p-3 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-50 animate-fadeIn space-y-1.5 ring-1 ring-black/10 dark:ring-white/10"
               >
-                <div className="px-3 py-2 border-b border-border/60 mb-1">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold text-foreground">Audio Quality</p>
-                    <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-surface-elevated text-foreground border border-border">
-                      {audioQuality.replace('_', ' ')}
-                    </span>
+                <div className="flex items-center justify-between pb-2 border-b border-border/60 mb-2">
+                  <div>
+                    <p className="text-xs font-extrabold text-foreground tracking-tight">Streaming Quality</p>
+                    <p className="text-[10px] text-foreground-muted">Select audio fidelity or data saver</p>
                   </div>
-                  <p className="text-[11px] text-foreground-muted">Select audio fidelity or conserve data</p>
+                  <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
+                    {audioQuality.replace('_', ' ')}
+                  </span>
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {qualityOptions.map((opt) => {
                     const isSelected = audioQuality === opt.id;
                     const OptIcon = opt.icon;
@@ -601,27 +601,29 @@ export const ExpandedPlayer: React.FC = () => {
                           setAudioQuality(opt.id);
                           setQualityMenuOpen(false);
                         }}
-                        className={`w-full flex items-start gap-2.5 p-2 rounded-xl text-left transition-all ${
+                        className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all border ${
                           isSelected
-                            ? 'bg-primary/20 border border-primary/40 text-foreground'
-                            : 'hover:bg-surface-elevated text-foreground-muted hover:text-foreground border border-transparent'
+                            ? 'bg-primary/15 border-primary/50 text-foreground shadow-sm shadow-primary/10'
+                            : 'bg-surface-elevated/60 hover:bg-surface-elevated border-border/40 hover:border-border text-foreground-muted hover:text-foreground'
                         }`}
                       >
-                        <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${opt.color}`}>
-                          <OptIcon className="w-3.5 h-3.5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-1">
-                            <span className={`text-xs font-bold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
-                              {opt.label}
-                            </span>
-                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface-elevated text-foreground border border-border/60">
-                              {opt.badge}
-                            </span>
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                          <div className={`p-1.5 rounded-lg shrink-0 border ${opt.color}`}>
+                            <OptIcon className="w-4 h-4" />
                           </div>
-                          <p className="text-[10px] text-foreground-muted leading-tight mt-0.5">{opt.desc}</p>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-xs font-bold truncate ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                                {opt.label}
+                              </span>
+                              {isSelected && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+                            </div>
+                            <p className="text-[10px] text-foreground-muted truncate leading-tight mt-0.5">{opt.desc}</p>
+                          </div>
                         </div>
-                        {isSelected && <Check className="w-4 h-4 text-primary shrink-0 self-center" />}
+                        <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-surface border border-border/70 text-foreground shrink-0 shadow-xs">
+                          {opt.badge}
+                        </span>
                       </button>
                     );
                   })}
