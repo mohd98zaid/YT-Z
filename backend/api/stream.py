@@ -83,7 +83,7 @@ class StreamResolver:
         now = time.time()
         cache_key = f"{video_id}_{quality}"
 
-        # 1. Check enabled Lossless Module Source Add-ons
+        # 1. Check enabled Lossless Module Source Add-ons & Alternative Hi-Res Masters
         if self.addon_resolver and quality in ("lossless", "high", "auto") and title:
             addon_stream = self.addon_resolver.resolve_lossless_stream(
                 title=title,
@@ -107,8 +107,8 @@ class StreamResolver:
                         "bitDepth": addon_stream.get("bitDepth", 16),
                         "isLossless": addon_stream.get("is_lossless", True),
                         "qualityTier": addon_stream.get("quality_tier", "lossless"),
-                        "source": "addon",
-                        "addonName": addon_stream.get("addon_name", "Hi-Res FLAC Addon"),
+                        "source": addon_stream.get("source", "addon"),
+                        "addonName": addon_stream.get("addon_name", "Hi-Res Alternative Master"),
                     }
                     _STREAM_CACHE[cache_key] = {
                         "data": result,
@@ -116,13 +116,47 @@ class StreamResolver:
                     }
                     return result
 
-        # 2. Fallback to YouTube Music Stream
+        # 2. Extract YouTube Stream Information
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if not info:
                     return None
+
+                yt_title = info.get("title", "") or title
+                yt_artist = info.get("uploader", "") or info.get("artist", "") or artist
+
+                # If title was not provided initially (e.g. raw playlist videoId),
+                # now that we have yt_title, attempt alternative lossless resolution before YouTube stream
+                if self.addon_resolver and quality in ("lossless", "high", "auto") and not title and yt_title:
+                    addon_stream = self.addon_resolver.resolve_lossless_stream(
+                        title=yt_title,
+                        artist=yt_artist,
+                        duration=info.get("duration", 0),
+                        quality_preference=quality
+                    )
+                    if addon_stream:
+                        stream_url = addon_stream.get("streamUrl", "")
+                        if stream_url.startswith("http://") or stream_url.startswith("https://"):
+                            result = {
+                                "videoId": video_id,
+                                "streamUrl": stream_url,
+                                "title": addon_stream.get("title", yt_title),
+                                "artist": addon_stream.get("artist", yt_artist),
+                                "duration": info.get("duration", 0),
+                                "codec": addon_stream["codec"],
+                                "format": addon_stream["format"],
+                                "bitrate": addon_stream["bitrate"],
+                                "sampleRate": addon_stream.get("sampleRate", 44100),
+                                "bitDepth": addon_stream.get("bitDepth", 16),
+                                "isLossless": addon_stream.get("is_lossless", True),
+                                "qualityTier": addon_stream.get("quality_tier", "lossless"),
+                                "source": addon_stream.get("source", "addon"),
+                                "addonName": addon_stream.get("addon_name", "Hi-Res Alternative Master"),
+                            }
+                            _STREAM_CACHE[cache_key] = {"data": result, "expires_at": now + CACHE_TTL}
+                            return result
 
                 stream_url = info.get("url")
                 formats = info.get("formats", [])
