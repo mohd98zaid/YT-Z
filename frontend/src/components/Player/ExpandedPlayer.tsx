@@ -485,7 +485,7 @@ export const ExpandedPlayer: React.FC = () => {
             <button
               onClick={() => startRadio()}
               title="Start Endless Song Radio"
-              className="p-1.5 sm:p-2 rounded-full bg-surface-elevated hover:bg-surface border border-border text-foreground hover:text-primary hover:border-primary/50 transition-all hover:scale-105 shadow-sm"
+              className="hidden sm:inline-flex p-1.5 sm:p-2 rounded-full bg-surface-elevated hover:bg-surface border border-border text-foreground hover:text-primary hover:border-primary/50 transition-all hover:scale-105 shadow-sm"
             >
               <Radio className="w-4 h-4" />
             </button>
@@ -512,7 +512,7 @@ export const ExpandedPlayer: React.FC = () => {
             <button
               onClick={toggleStatsForNerds}
               title="Stats for Nerds"
-              className={`p-1.5 sm:p-2 rounded-full border transition-all shadow-sm ${
+              className={`hidden sm:inline-flex p-1.5 sm:p-2 rounded-full border transition-all shadow-sm ${
                 showStatsForNerds
                   ? 'bg-primary text-white border-primary shadow-md shadow-primary/30'
                   : 'bg-surface-elevated hover:bg-surface text-foreground border-border hover:text-primary hover:border-primary/50'
@@ -1050,9 +1050,9 @@ export const ExpandedPlayer: React.FC = () => {
         )}
 
         {/* Action Controls */}
-        <div className="flex items-center justify-between w-full max-w-2xl">
-          {/* Playback speed selector */}
-          <div className="flex items-center gap-1">
+        <div className="flex items-center justify-between w-full max-w-2xl px-1 sm:px-2">
+          {/* Playback speed selector (hidden on small mobile to give primary buttons room) */}
+          <div className="hidden sm:flex items-center gap-1">
             {[0.75, 1.0, 1.25, 1.5].map((spd) => (
               <button
                 key={spd}
@@ -1069,7 +1069,7 @@ export const ExpandedPlayer: React.FC = () => {
           </div>
 
           {/* Primary Buttons */}
-          <div className="flex items-center gap-5 sm:gap-6">
+          <div className="flex items-center gap-4 sm:gap-6 mx-auto sm:mx-0">
             <button
               onClick={toggleShuffle}
               className={`p-1.5 rounded-full ${
@@ -1079,7 +1079,7 @@ export const ExpandedPlayer: React.FC = () => {
               <Shuffle className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
-            <button onClick={previous} className="text-foreground hover:scale-110 transition-transform">
+            <button onClick={previous} className="text-foreground hover:scale-110 active:scale-95 transition-transform">
               <SkipBack className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
             </button>
 
@@ -1097,7 +1097,7 @@ export const ExpandedPlayer: React.FC = () => {
               )}
             </button>
 
-            <button onClick={next} className="text-foreground hover:scale-110 transition-transform">
+            <button onClick={next} className="text-foreground hover:scale-110 active:scale-95 transition-transform">
               <SkipForward className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
             </button>
 
@@ -1111,10 +1111,11 @@ export const ExpandedPlayer: React.FC = () => {
             </button>
           </div>
 
-          {/* 1-Click Download in Expanded Player at playing audio quality */}
+          {/* 1-Click Download in Expanded Player */}
+          {/* Desktop full button with label */}
           <button
             onClick={handleDownloadCurrent}
-            className={`flex items-center gap-1.5 px-3.5 py-1 rounded-full text-[11px] font-bold border transition-all ${
+            className={`hidden sm:flex items-center gap-1.5 px-3.5 py-1 rounded-full text-[11px] font-bold border transition-all ${
               downloadQueued
                 ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
                 : audioStats?.isLossless
@@ -1130,6 +1131,20 @@ export const ExpandedPlayer: React.FC = () => {
                 ? 'Download Original FLAC'
                 : 'Download Original Audio'}
             </span>
+          </button>
+          {/* Mobile compact icon button */}
+          <button
+            onClick={handleDownloadCurrent}
+            title="Download song"
+            className={`flex sm:hidden p-2 rounded-full border transition-all ${
+              downloadQueued
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                : audioStats?.isLossless
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                : 'bg-surface-elevated text-foreground-muted border-border hover:text-foreground'
+            }`}
+          >
+            <Download className="w-4 h-4" />
           </button>
         </div>
       </footer>

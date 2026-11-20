@@ -173,8 +173,10 @@ export const MiniPlayer: React.FC = () => {
         </div>
       )}
 
-      {/* Left: Track Information */}
-      <div className="flex items-center gap-3 w-1/4 min-w-[200px]">
+      {/* Desktop 3-Column Control Center (hidden md:flex) */}
+      <div className="hidden md:flex items-center justify-between w-full h-full">
+        {/* Left: Track Information */}
+        <div className="flex items-center gap-3 w-1/4 min-w-[200px]">
         <div
           className="relative w-14 h-14 rounded-xl overflow-hidden shadow-lg border border-border shrink-0 cursor-pointer group"
           onClick={() => setExpanded(true)}
@@ -576,6 +578,65 @@ export const MiniPlayer: React.FC = () => {
         >
           <Maximize2 className="w-4 h-4" />
         </button>
+      </div>
+    </div>
+
+    {/* Mobile Compact Player Bar (flex md:hidden) */}
+      <div className="flex md:hidden items-center justify-between w-full h-full gap-2 px-1">
+        {/* Left: Artwork + Track details (Tapping opens Fullscreen Player) */}
+        <div
+          onClick={() => setExpanded(true)}
+          className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer py-1"
+        >
+          <img
+            src={currentTrack.thumbnail || '/placeholder.png'}
+            alt={currentTrack.title}
+            className="w-12 h-12 rounded-xl object-cover shadow-md border border-border shrink-0"
+          />
+          <div className="min-w-0 flex-1 pr-1">
+            <h4 className="font-bold text-xs text-foreground truncate">{currentTrack.title}</h4>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <p className="text-[11px] text-foreground-muted truncate">{currentTrack.artist}</p>
+              {audioStats?.isLossless && (
+                <span className="shrink-0 px-1 py-0.2 rounded text-[8px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  FLAC
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Touch Play/Pause & Skip */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={previous}
+            className="p-2 text-foreground-muted hover:text-foreground active:scale-95 transition-transform"
+            title="Previous track"
+          >
+            <SkipBack className="w-4 h-4 fill-current" />
+          </button>
+          <button
+            onClick={togglePlay}
+            disabled={isLoading}
+            className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-md shadow-primary/30 active:scale-95 transition-transform"
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isLoading ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : isPlaying ? (
+              <Pause className="w-4 h-4 fill-current" />
+            ) : (
+              <Play className="w-4 h-4 fill-current ml-0.5" />
+            )}
+          </button>
+          <button
+            onClick={next}
+            className="p-2 text-foreground-muted hover:text-foreground active:scale-95 transition-transform"
+            title="Next track"
+          >
+            <SkipForward className="w-4 h-4 fill-current" />
+          </button>
+        </div>
       </div>
     </div>
   );
