@@ -21,29 +21,117 @@ STRIP_PATTERNS = [
     r"\(visualizer\)",
     r"\(lyric\s+video\)",
     r"\(lyrics\)",
+    r"\(full\s+song\)",
+    r"\(audio\)",
+    r"\(video\)",
     r"\[official\s+video\]",
+    r"\[official\s+music\s+video\]",
     r"\[official\s+audio\]",
     r"\[lyrics\]",
+    r"\[full\s+song\]",
+    r"\[hd\]",
+    r"\[4k\]",
     r"\bft\.?.*$",
     r"\bfeat\.?.*$",
 ]
+
+KNOWN_RECORD_LABELS = {
+    "t-series", "tseries", "zee music company", "sony music india", "yrf",
+    "tips official", "speed records", "saregama", "saregama music", "wave music",
+    "aditya music", "lahari music", "geet mp3", "vevo", "universal music",
+    "warner music", "def jam", "atlantic records", "columbia records", "interscope"
+}
 
 def clean_title(title: str) -> str:
     cleaned = title
     for p in STRIP_PATTERNS:
         cleaned = re.sub(p, "", cleaned, flags=re.IGNORECASE)
     cleaned = cleaned.replace("&", "and").strip()
-    # If title has "Artist - Song", extract Song
     if " - " in cleaned:
         cleaned = cleaned.split(" - ", 1)[1]
     return cleaned.strip()
 
 def clean_artist(artist: str) -> str:
-    cleaned = artist
+    cleaned = artist.strip()
+    if cleaned.lower().endswith(" - topic"):
+        cleaned = cleaned[:-8].strip()
     for sep in [",", "&", "feat.", "ft.", "/"]:
         if sep in cleaned:
             cleaned = cleaned.split(sep)[0]
     return cleaned.strip()
+
+def generate_search_candidates(title: str, artist: str) -> List[tuple]:
+    """
+    Generate ordered candidate pairs of (track_name, artist_name) to maximize
+    matches across YouTube's movie titles, record labels, and collaborative tags.
+    """
+    candidates = []
+
+    # Clean artist and detect if artist is a record label
+    raw_artist = artist.strip()
+    if raw_artist.lower().endswith(" - topic"):
+        raw_artist = raw_artist[:-8].strip()
+    is_label = raw_artist.lower() in KNOWN_RECORD_LABELS
+    primary_artist = "" if is_label else clean_artist(raw_artist)
+
+    # Clean title from media tags
+    t = title
+    for p in STRIP_PATTERNS:
+        t = re.sub(p, "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+", " ", t).strip()
+
+    # Split pipe '|' common in Bollywood / YouTube titles (e.g. "Song | Movie | Singers")
+    pipe_parts = [p.strip() for p in t.split("|") if p.strip()]
+    first_segment = pipe_parts[0] if pipe_parts else t
+
+    # Handle Colon ':' in first segment (e.g. "KING: Tu Mil Jaaye")
+    if ":" in first_segment:
+        prefix, post = first_segment.split(":", 1)
+        prefix = prefix.strip()
+        post = post.strip()
+        # post is song title, prefix might be singer or movie
+        candidates.append((post, prefix))
+        if primary_artist:
+            candidates.append((post, primary_artist))
+        candidates.append((post, ""))
+        candidates.append((first_segment, primary_artist))
+    else:
+        candidates.append((first_segment, primary_artist))
+        if primary_artist:
+            candidates.append((first_segment, ""))
+
+    # Handle Hyphen ' - ' (e.g. "Artist - Song" or "Movie - Song")
+    if " - " in first_segment:
+        left, right = first_segment.split(" - ", 1)
+        candidates.append((right.strip(), left.strip()))
+        candidates.append((right.strip(), primary_artist))
+        candidates.append((right.strip(), ""))
+        candidates.append((left.strip(), primary_artist))
+
+    # Strip parentheses/brackets like "(From 'KING')"
+    clean_no_parens = re.sub(r"[\(\[].*?[\)\]]", "", first_segment).strip()
+    if clean_no_parens and clean_no_parens != first_segment:
+        candidates.append((clean_no_parens, primary_artist))
+        candidates.append((clean_no_parens, ""))
+
+    # Fallback with raw title cleaned
+    c_title = clean_title(title)
+    candidates.append((c_title, primary_artist))
+
+    # Deduplicate while preserving priority order
+    seen = set()
+    unique_candidates = []
+    for track, art in candidates:
+        track = track.strip()
+        art = art.strip()
+        if not track:
+            continue
+        key = (track.lower(), art.lower())
+        if key not in seen:
+            seen.add(key)
+            unique_candidates.append((track, art))
+
+    return unique_candidates
 
 def parse_time_tag(tag: str) -> float:
     """Converts mm:ss.xx or hh:mm:ss.xx to seconds"""
@@ -139,26 +227,33 @@ class LyricsEngine:
                 "lines": cached["lyrics"]
             }
 
-        c_title = clean_title(title)
-        c_artist = clean_artist(artist)
+        candidates = generate_search_candidates(title, artist)
+        plain_fallback = None
 
-        # 1. Try LRCLIB
-        lrclib_res = self._fetch_lrclib(c_title, c_artist, duration)
-        if lrclib_res:
-            self.db.cache_lyrics(cache_key, lrclib_res["lines"], "LRCLIB")
-            return lrclib_res
+        for cand_title, cand_artist in candidates:
+            # 1. Try LRCLIB
+            lrclib_res = self._fetch_lrclib(cand_title, cand_artist, duration)
+            if lrclib_res:
+                if lrclib_res.get("synced"):
+                    self.db.cache_lyrics(cache_key, lrclib_res["lines"], "LRCLIB")
+                    return lrclib_res
+                elif not plain_fallback:
+                    plain_fallback = lrclib_res
 
-        # 2. Try lrc.red (search for track isrc or title)
-        lrcred_res = self._fetch_lrcred(c_title, c_artist)
-        if lrcred_res:
-            self.db.cache_lyrics(cache_key, lrcred_res["lines"], "lrc.red")
-            return lrcred_res
+            # 2. Try lrc.red (search for track isrc or title)
+            lrcred_res = self._fetch_lrcred(cand_title, cand_artist)
+            if lrcred_res:
+                self.db.cache_lyrics(cache_key, lrcred_res["lines"], "lrc.red")
+                return lrcred_res
 
-        # 3. Try KuGou
-        kugou_res = self._fetch_kugou(c_title, c_artist)
-        if kugou_res:
-            self.db.cache_lyrics(cache_key, kugou_res["lines"], "KuGou")
-            return kugou_res
+            # 3. Try KuGou
+            kugou_res = self._fetch_kugou(cand_title, cand_artist)
+            if kugou_res:
+                self.db.cache_lyrics(cache_key, kugou_res["lines"], "KuGou")
+                return kugou_res
+
+        if plain_fallback:
+            return plain_fallback
 
         return {
             "synced": False,
@@ -168,7 +263,9 @@ class LyricsEngine:
 
     def _fetch_lrclib(self, title: str, artist: str, duration: int) -> Optional[Dict[str, Any]]:
         try:
-            params = {"track_name": title, "artist_name": artist}
+            params = {"track_name": title}
+            if artist:
+                params["artist_name"] = artist
             if duration > 0:
                 params["duration"] = str(duration)
             resp = requests.get("https://lrclib.net/api/get", params=params, timeout=4)
@@ -185,16 +282,24 @@ class LyricsEngine:
                     return {"synced": False, "provider": "LRCLIB (Plain)", "lines": plain_lines}
             
             # If exact match failed, try search endpoint
-            search_resp = requests.get("https://lrclib.net/api/search", params={"q": f"{title} {artist}"}, timeout=4)
+            query = f"{title} {artist}".strip()
+            search_resp = requests.get("https://lrclib.net/api/search", params={"q": query}, timeout=4)
             if search_resp.status_code == 200:
                 items = search_resp.json()
                 if items and isinstance(items, list):
-                    for item in items[:3]:
+                    # Priority to synced
+                    for item in items[:4]:
                         synced = item.get("syncedLyrics")
                         if synced:
                             parsed_lines = parse_lrc(synced)
                             if parsed_lines:
                                 return {"synced": True, "provider": "LRCLIB", "lines": parsed_lines}
+                    # Fallback to plain
+                    for item in items[:4]:
+                        plain = item.get("plainLyrics")
+                        if plain:
+                            plain_lines = [{"time": 0, "text": line, "words": None} for line in plain.splitlines() if line.strip()]
+                            return {"synced": False, "provider": "LRCLIB (Plain)", "lines": plain_lines}
         except Exception as e:
             logger.debug(f"LRCLIB fetch error: {e}")
         return None
