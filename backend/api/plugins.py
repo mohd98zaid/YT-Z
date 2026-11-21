@@ -187,11 +187,34 @@ class PluginService:
         # Remote HTTP endpoints
         start = time.perf_counter()
         try:
-            # Check manifest or search/health endpoint
-            manifest_url = endpoint if endpoint.endswith("manifest.json") else f"{endpoint.rstrip('/')}/manifest.json"
-            resp = requests.get(manifest_url, timeout=4.0, headers={"User-Agent": "YT-Z/1.0"})
-            if resp.status_code >= 400:
-                resp = requests.head(endpoint, timeout=4.0, headers={"User-Agent": "YT-Z/1.0"})
+            # Check manifest or search/health endpoint with Eclipse and Stremio fallbacks
+            test_urls = []
+            if endpoint.endswith("manifest.json"):
+                test_urls.append(endpoint)
+            else:
+                base = endpoint.rstrip("/")
+                test_urls.append(f"{base}/manifest.json")
+                if "/music" in base:
+                    test_urls.append(f"{base.replace('/music', '/eclipse')}/manifest.json")
+                    test_urls.append(f"{base.replace('/music', '')}/manifest.json")
+                elif "/eclipse" in base:
+                    test_urls.append(f"{base.replace('/eclipse', '/music')}/manifest.json")
+                    test_urls.append(f"{base.replace('/eclipse', '')}/manifest.json")
+                test_urls.append(base)
+
+            resp = None
+            for u in test_urls:
+                try:
+                    r = requests.get(u, timeout=3.5, headers={"User-Agent": "BitChord/1.9.1 (YT-Z)"})
+                    if r.status_code < 400:
+                        resp = r
+                        break
+                except Exception:
+                    continue
+
+            if resp is None:
+                resp = requests.head(endpoint, timeout=3.0, headers={"User-Agent": "BitChord/1.9.1 (YT-Z)"})
+
             elapsed_ms = int((time.perf_counter() - start) * 1000)
             status = "active" if resp.status_code < 400 else "degraded"
             self.db.update_plugin_status(plugin_id, status, elapsed_ms)
