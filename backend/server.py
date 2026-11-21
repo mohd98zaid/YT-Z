@@ -35,6 +35,7 @@ from backend.api.local_library import LocalLibrary
 from backend.api.plugins import PluginService
 from backend.api.youtube_search import YouTubeSearchService
 from backend.api.addon_source import AddonSourceResolver
+from backend.core.audio_cache import audio_cache
 
 logging.basicConfig(
     level=logging.INFO,
@@ -241,9 +242,20 @@ async def stream_audio_proxy(
     quality: Optional[str] = Query("auto")
 ):
     """
-    Audio streaming proxy with HTTP 206 Partial Content Range support and fast disconnection cleanup.
-    Supports Lossless FLAC/ALAC add-on streams and YouTube Opus.
+    High-Performance Audio streaming proxy with:
+    1. 0ms Local Disk Audio Cache with HTTP 206 Partial Content Range support.
+    2. Resilient failover: If external/addon source times out or fails, falls back immediately
+       to YouTube native Opus without throwing 502 Bad Gateway.
+    3. Simultaneous background cache recording so subsequent playback is 100% local.
     """
+    range_header = request.headers.get("Range")
+
+    # 1. Check local audio cache on disk first (0ms instant response)
+    cached_resp = audio_cache.serve_cached(video_id, range_header=range_header)
+    if cached_resp is not None:
+        return cached_resp
+
+    # 2. Resolve audio stream metadata
     loop = asyncio.get_event_loop()
     stream_info = await loop.run_in_executor(
         None,
@@ -261,62 +273,180 @@ async def stream_audio_proxy(
     if not stream_url:
         raise HTTPException(status_code=404, detail="No stream URL available.")
 
-    range_header = request.headers.get("Range")
     remote_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     }
     if range_header:
         remote_headers["Range"] = range_header
 
+    resp = None
     try:
-        resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=12)
-        
-        # Determine content type based on codec
-        codec = str(stream_info.get("codec", "")).lower()
-        if "flac" in codec:
-            content_type = "audio/flac"
-        elif "alac" in codec or "m4a" in codec or "mp4" in codec:
-            content_type = "audio/mp4"
-        elif "mp3" in codec:
-            content_type = "audio/mpeg"
-        else:
-            content_type = resp.headers.get("Content-Type", "audio/webm")
+        # Strict 4.0s timeout for initial connection to avoid long client stalls
+        resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=4.0)
+        if resp.status_code not in (200, 206):
+            raise ValueError(f"Upstream returned non-200/206 status: {resp.status_code}")
+    except Exception as primary_err:
+        logger.warning(f"Primary audio stream connection failed for {video_id} ({primary_err}). Falling back immediately to YouTube Native Opus...")
+        try:
+            from backend.api.stream import _STREAM_CACHE
+            _STREAM_CACHE.pop(f"{video_id}_{quality}", None)
+        except Exception:
+            pass
 
-        headers = {
-            "Accept-Ranges": "bytes",
-            "Content-Type": content_type,
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "public, max-age=3600",
-            "X-Audio-Codec": str(stream_info.get("codec", "opus")),
-            "X-Audio-Bitrate": str(stream_info.get("bitrate", 256)),
-            "X-Audio-Lossless": "true" if stream_info.get("isLossless") else "false",
-            "X-Audio-Source": str(stream_info.get("source", "youtube")),
-        }
-        if "Content-Range" in resp.headers:
-            headers["Content-Range"] = resp.headers["Content-Range"]
-        if "Content-Length" in resp.headers:
-            headers["Content-Length"] = resp.headers["Content-Length"]
-
-        # Optimized 128KB chunk stream with instant client disconnect release
-        async def chunk_generator():
-            try:
-                for chunk in resp.iter_content(chunk_size=128 * 1024):
-                    if await request.is_disconnected():
-                        break
-                    if chunk:
-                        yield chunk
-            finally:
-                resp.close()
-
-        return StreamingResponse(
-            chunk_generator(),
-            status_code=resp.status_code,
-            headers=headers,
-            media_type=content_type
+        # Immediate resilient fallback to native YouTube stream
+        stream_info = await loop.run_in_executor(
+            None,
+            lambda: stream_resolver._do_resolve_audio(video_id, title=title, artist=artist, quality="standard")
         )
-    except Exception as e:
-        logger.error(f"Error proxying audio for {video_id}: {e}")
-        raise HTTPException(status_code=502, detail=f"Failed to fetch audio: {e}")
+        if not stream_info or not stream_info.get("streamUrl"):
+            raise HTTPException(status_code=502, detail="Failed to resolve playable audio.")
+        stream_url = stream_info["streamUrl"]
+        try:
+            resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=8.0)
+            if resp.status_code not in (200, 206):
+                raise HTTPException(status_code=502, detail=f"Fallback upstream failed: {resp.status_code}")
+        except Exception as fallback_err:
+            logger.error(f"Fallback stream connection also failed for {video_id}: {fallback_err}")
+            raise HTTPException(status_code=502, detail="Audio stream unavailable.")
+
+    # Determine content type based on codec
+    codec = str(stream_info.get("codec", "")).lower()
+    if "flac" in codec:
+        content_type = "audio/flac"
+    elif "alac" in codec or "m4a" in codec or "mp4" in codec:
+        content_type = "audio/mp4"
+    elif "mp3" in codec:
+        content_type = "audio/mpeg"
+    else:
+        content_type = resp.headers.get("Content-Type", "audio/webm")
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Type": content_type,
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=3600",
+        "X-Audio-Codec": str(stream_info.get("codec", "opus")),
+        "X-Audio-Bitrate": str(stream_info.get("bitrate", 256)),
+        "X-Audio-Lossless": "true" if stream_info.get("isLossless") else "false",
+        "X-Audio-Source": str(stream_info.get("source", "youtube")),
+    }
+    if "Content-Range" in resp.headers:
+        headers["Content-Range"] = resp.headers["Content-Range"]
+    if "Content-Length" in resp.headers:
+        headers["Content-Length"] = resp.headers["Content-Length"]
+
+    # Determine if we should record to disk cache (full file requests from byte 0)
+    is_full_request = (not range_header) or range_header.startswith("bytes=0-")
+    _, _, part_file = audio_cache.get_file_paths(video_id)
+    cache_file_handle = None
+    if is_full_request:
+        try:
+            cache_file_handle = open(part_file, "wb")
+        except Exception as e:
+            logger.debug(f"Unable to open part file for cache: {e}")
+
+    # Optimized 128KB chunk stream with instant client disconnect release
+    async def chunk_generator():
+        nonlocal cache_file_handle
+        all_chunks_received = True
+        try:
+            for chunk in resp.iter_content(chunk_size=128 * 1024):
+                if await request.is_disconnected():
+                    all_chunks_received = False
+                    break
+                if chunk:
+                    if cache_file_handle:
+                        try:
+                            cache_file_handle.write(chunk)
+                        except Exception:
+                            pass
+                    yield chunk
+        finally:
+            resp.close()
+            if cache_file_handle:
+                try:
+                    cache_file_handle.close()
+                    if all_chunks_received and part_file.exists() and part_file.stat().st_size > 32 * 1024:
+                        meta = {
+                            "videoId": video_id,
+                            "title": title or stream_info.get("title", ""),
+                            "artist": artist or stream_info.get("artist", ""),
+                            "content_type": content_type,
+                            "codec": stream_info.get("codec", "opus"),
+                            "bitrate": stream_info.get("bitrate", 256),
+                            "isLossless": stream_info.get("isLossless", False),
+                            "source": stream_info.get("source", "stream"),
+                        }
+                        audio_cache.store_file(video_id, part_file, meta)
+                    else:
+                        part_file.unlink(missing_ok=True)
+                except Exception as ex:
+                    logger.debug(f"Error finalizing cache file: {ex}")
+
+    return StreamingResponse(
+        chunk_generator(),
+        status_code=resp.status_code,
+        headers=headers,
+        media_type=content_type
+    )
+
+@app.get("/api/stream/{video_id}/preload")
+@app.post("/api/stream/{video_id}/preload")
+async def preload_track_audio(
+    video_id: str,
+    title: Optional[str] = Query(""),
+    artist: Optional[str] = Query(""),
+    quality: Optional[str] = Query("auto")
+):
+    """
+    Preloads and caches audio for the specified track in the background.
+    Prepares the next track in the 2-song cache so it plays in 0ms.
+    """
+    if audio_cache.is_cached(video_id):
+        return {"status": "already_cached", "videoId": video_id}
+
+    def do_preload():
+        try:
+            stream_info = stream_resolver.resolve_audio(video_id, title=title, artist=artist, quality=quality)
+            if not stream_info or not stream_info.get("streamUrl"):
+                return
+            url = stream_info["streamUrl"]
+            _, _, part_file = audio_cache.get_file_paths(video_id)
+            req_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            with requests.get(url, headers=req_headers, stream=True, timeout=12) as r:
+                if r.status_code in (200, 206):
+                    with open(part_file, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=128 * 1024):
+                            if chunk:
+                                f.write(chunk)
+                    codec = str(stream_info.get("codec", "")).lower()
+                    if "flac" in codec:
+                        content_type = "audio/flac"
+                    elif "alac" in codec or "m4a" in codec or "mp4" in codec:
+                        content_type = "audio/mp4"
+                    elif "mp3" in codec:
+                        content_type = "audio/mpeg"
+                    else:
+                        content_type = r.headers.get("Content-Type", "audio/webm")
+
+                    meta = {
+                        "videoId": video_id,
+                        "title": title or stream_info.get("title", ""),
+                        "artist": artist or stream_info.get("artist", ""),
+                        "content_type": content_type,
+                        "codec": stream_info.get("codec", "opus"),
+                        "bitrate": stream_info.get("bitrate", 256),
+                        "isLossless": stream_info.get("isLossless", False),
+                        "source": stream_info.get("source", "preload"),
+                    }
+                    audio_cache.store_file(video_id, part_file, meta)
+        except Exception as e:
+            logger.debug(f"Preload worker error for {video_id}: {e}")
+
+    threading.Thread(target=do_preload, daemon=True).start()
+    return {"status": "preloading", "videoId": video_id}
 
 @app.get("/api/stream/{video_id}/video-info")
 def get_video_stream_info(video_id: str):
