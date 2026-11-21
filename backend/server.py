@@ -7,6 +7,7 @@ Multi-provider Lyrics Engine, Spotify Importer, and Local Media Server.
 import sys
 import os
 import asyncio
+import threading
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
