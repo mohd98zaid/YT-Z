@@ -314,6 +314,42 @@ class AddonSourceResolver:
         except Exception as e:
             logger.debug(f"Addon '{addon_name}' direct /stream failed: {e}")
 
+        # 4. Stremio / PencariMovie Addon Protocol (/catalog/... -> /stream/...)
+        try:
+            stremio_base = base_url.replace("/manifest.json", "").rstrip("/")
+            for c_type in ["movie", "series", "music", "track"]:
+                c_url = f"{stremio_base}/catalog/{c_type}/pm_music_search/search={urllib.parse.quote(search_query)}.json"
+                c_resp = requests.get(c_url, headers=req_headers, timeout=2.0)
+                if c_resp.status_code == 200:
+                    c_data = c_resp.json()
+                    metas = c_data.get("metas", [])
+                    if metas:
+                        first_meta = metas[0]
+                        m_id = first_meta.get("id")
+                        m_type = first_meta.get("type", c_type)
+                        st_url = f"{stremio_base}/stream/{m_type}/{urllib.parse.quote(str(m_id))}.json"
+                        st_resp = requests.get(st_url, headers=req_headers, timeout=2.0)
+                        if st_resp.status_code == 200:
+                            st_data = st_resp.json()
+                            streams = st_data.get("streams", [])
+                            for st_item in streams:
+                                m_url = st_item.get("url")
+                                if m_url and (m_url.startswith("http://") or m_url.startswith("https://")):
+                                    if self._verify_stream_url(m_url, req_headers):
+                                        return self._format_stream_result(
+                                            {
+                                                "title": first_meta.get("name", title),
+                                                "codec": "flac" if ".flac" in m_url.lower() else ("mp3" if ".mp3" in m_url.lower() else "aac"),
+                                                "bitrate": 320,
+                                            },
+                                            addon_name,
+                                            first_meta.get("name", title),
+                                            artist,
+                                            m_url
+                                        )
+        except Exception as e:
+            logger.debug(f"Addon '{addon_name}' Stremio catalog search failed: {e}")
+
         return None
 
     def _rank_candidates(self, tracks: List[Dict[str, Any]], clean_title: str, clean_artist: str) -> List[Dict[str, Any]]:
