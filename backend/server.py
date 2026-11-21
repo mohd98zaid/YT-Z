@@ -324,11 +324,15 @@ async def stream_audio_proxy(
         "Accept-Ranges": "bytes",
         "Content-Type": content_type,
         "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "X-Audio-Codec, X-Audio-Bitrate, X-Audio-Lossless, X-Audio-Source, X-Audio-Sample-Rate, X-Audio-Bit-Depth, X-Audio-Addon-Name",
         "Cache-Control": "public, max-age=3600",
         "X-Audio-Codec": str(stream_info.get("codec", "opus")),
         "X-Audio-Bitrate": str(stream_info.get("bitrate", 256)),
         "X-Audio-Lossless": "true" if stream_info.get("isLossless") else "false",
         "X-Audio-Source": str(stream_info.get("source", "youtube")),
+        "X-Audio-Sample-Rate": str(stream_info.get("sampleRate", 44100)),
+        "X-Audio-Bit-Depth": str(stream_info.get("bitDepth", 16)),
+        "X-Audio-Addon-Name": str(stream_info.get("addonName", stream_info.get("source", "youtube"))),
     }
     if "Content-Range" in resp.headers:
         headers["Content-Range"] = resp.headers["Content-Range"]

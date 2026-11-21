@@ -129,23 +129,77 @@ class AddonSourceResolver:
                                     best = dl_urls[-1]
                                     stream_url = best.get("link") or best.get("url")
                                     if stream_url and self._verify_stream_url(stream_url, headers):
-                                        quality_str = str(best.get("quality", "Lossless Studio Master"))
+                                        raw_quality = str(best.get("quality", "320kbps")).lower()
+                                        stream_lower = stream_url.lower()
+
+                                        # Parse genuine stream bitrate
+                                        if "320" in raw_quality or "320" in stream_lower:
+                                            actual_bitrate = 320
+                                        elif "160" in raw_quality or "160" in stream_lower:
+                                            actual_bitrate = 160
+                                        elif "128" in raw_quality or "128" in stream_lower:
+                                            actual_bitrate = 128
+                                        elif "96" in raw_quality or "96" in stream_lower:
+                                            actual_bitrate = 96
+                                        elif "48" in raw_quality or "48" in stream_lower:
+                                            actual_bitrate = 48
+                                        else:
+                                            actual_bitrate = 320
+
+                                        # Detect genuine codec and container from URL and stream properties
+                                        if ".flac" in stream_lower:
+                                            codec = "flac"
+                                            is_genuine_lossless = True
+                                            format_name = "FLAC"
+                                            bit_depth = 24 if actual_bitrate > 1500 else 16
+                                            sample_rate = 96000 if bit_depth == 24 else 44100
+                                        elif ".alac" in stream_lower:
+                                            codec = "alac"
+                                            is_genuine_lossless = True
+                                            format_name = "ALAC"
+                                            bit_depth = 24 if actual_bitrate > 1500 else 16
+                                            sample_rate = 96000 if bit_depth == 24 else 44100
+                                        elif ".mp4" in stream_lower or ".m4a" in stream_lower or "aac" in stream_lower:
+                                            codec = "aac"
+                                            is_genuine_lossless = False
+                                            format_name = "AAC"
+                                            bit_depth = 16
+                                            sample_rate = 44100
+                                        elif ".mp3" in stream_lower:
+                                            codec = "mp3"
+                                            is_genuine_lossless = False
+                                            format_name = "MP3"
+                                            bit_depth = 16
+                                            sample_rate = 44100
+                                        else:
+                                            codec = "aac"
+                                            is_genuine_lossless = False
+                                            format_name = "AAC"
+                                            bit_depth = 16
+                                            sample_rate = 44100
+
                                         raw_name = s.get("name", cand_title)
-                                        # Decode HTML entities if any (e.g. &quot;)
                                         import html
                                         clean_name = html.unescape(raw_name)
-                                        is_hi_res = quality_preference in ("lossless", "auto")
-                                        logger.info(f"Resolved Alternative Hi-Res stream for '{title}': {quality_str} from Studio Master CDN")
+                                        
+                                        if is_genuine_lossless:
+                                            addon_label = f"Studio Master Lossless ({codec.upper()})"
+                                        elif actual_bitrate >= 320:
+                                            addon_label = "JioSaavn Studio Master (320k AAC)"
+                                        else:
+                                            addon_label = f"JioSaavn Audio ({actual_bitrate}k {format_name})"
+
+                                        logger.info(f"Resolved stream for '{title}': {addon_label} ({codec.upper()} {actual_bitrate} kbps)")
                                         return {
                                             "source": "alternative_hires",
-                                            "addon_name": "Hi-Res Studio Master (FLAC Lossless)" if is_hi_res else "Lossless CD Master (1411k)",
-                                            "is_lossless": True,
-                                            "codec": "flac",
-                                            "format": "24-bit / 96kHz Lossless FLAC" if is_hi_res else "16-bit / 44.1kHz Lossless FLAC",
-                                            "bitrate": 2304 if is_hi_res else 1411,
-                                            "sampleRate": 96000 if is_hi_res else 44100,
-                                            "bitDepth": 24 if is_hi_res else 16,
-                                            "quality_tier": "lossless",
+                                            "addon_name": addon_label,
+                                            "is_lossless": is_genuine_lossless,
+                                            "codec": codec,
+                                            "format": format_name,
+                                            "bitrate": actual_bitrate,
+                                            "sampleRate": sample_rate,
+                                            "bitDepth": bit_depth,
+                                            "quality_tier": "hi-res" if is_genuine_lossless else "high",
                                             "streamUrl": stream_url,
                                             "title": clean_name,
                                             "artist": s.get("primaryArtists", artist),
@@ -316,28 +370,47 @@ class AddonSourceResolver:
         default_artist: str,
         stream_url: str
     ) -> Dict[str, Any]:
-        raw_codec = str(data.get("codec") or data.get("format") or "flac").lower()
-        codec = "flac" if "flac" in raw_codec else raw_codec
+        raw_codec = str(data.get("codec") or data.get("format") or "").lower()
+        stream_lower = stream_url.lower()
 
-        # Bitrate parsing (handle bps like 2144245 -> convert to kbps 2144)
-        raw_bitrate = data.get("bitrate", 1411)
-        try:
-            bitrate_num = int(raw_bitrate)
-            bitrate_kbps = bitrate_num // 1000 if bitrate_num > 10000 else bitrate_num
-        except:
+        if "flac" in raw_codec or ".flac" in stream_lower:
+            codec = "flac"
+        elif "alac" in raw_codec or ".alac" in stream_lower:
+            codec = "alac"
+        elif "opus" in raw_codec or ".opus" in stream_lower or ".webm" in stream_lower:
+            codec = "opus"
+        elif "aac" in raw_codec or ".m4a" in stream_lower or ".mp4" in stream_lower:
+            codec = "aac"
+        elif "mp3" in raw_codec or ".mp3" in stream_lower:
+            codec = "mp3"
+        else:
+            codec = raw_codec or "aac"
+
+        # Bitrate parsing (handle bps like 320000 -> convert to kbps 320)
+        raw_bitrate = data.get("bitrate")
+        bitrate_kbps = 320
+        if raw_bitrate:
+            try:
+                bitrate_num = int(raw_bitrate)
+                bitrate_kbps = bitrate_num // 1000 if bitrate_num > 10000 else bitrate_num
+            except Exception:
+                bitrate_kbps = 320
+        elif codec == "opus":
+            bitrate_kbps = 160
+        elif codec == "flac":
             bitrate_kbps = 1411
 
-        bit_depth = int(data.get("bitDepth", 24 if bitrate_kbps > 1500 else 16))
-        sample_rate = int(data.get("sampleRate", 96000 if bit_depth == 24 else 44100))
-        is_lossless = codec in ("flac", "alac", "wav", "aiff") or bitrate_kbps >= 900
+        is_lossless = codec in ("flac", "alac", "wav", "aiff")
+        bit_depth = int(data.get("bitDepth", 24 if (is_lossless and bitrate_kbps > 1500) else 16))
+        sample_rate = int(data.get("sampleRate", 96000 if (is_lossless and bit_depth == 24) else (48000 if codec == "opus" else 44100)))
 
         display_name = addon_name
         if "pencarimovie" in str(addon_name).lower() or "pencari" in str(addon_name).lower():
             display_name = "PencariMusic"
         elif "custom" in str(addon_name).lower():
-            display_name = "Lossless Audio Master"
+            display_name = "Audio Master Source"
 
-        logger.info(f"Resolved Hi-Res stream from '{display_name}': {codec.upper()} {bitrate_kbps}kbps {sample_rate}Hz/{bit_depth}bit")
+        logger.info(f"Resolved stream from '{display_name}': {codec.upper()} {bitrate_kbps}kbps {sample_rate}Hz/{bit_depth}bit (lossless={is_lossless})")
         return {
             "source": "addon",
             "addon_name": display_name,

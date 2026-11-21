@@ -168,10 +168,27 @@ class StreamResolver:
                 if audio_formats:
                     best_audio = sorted(audio_formats, key=lambda x: x.get("abr") or 0, reverse=True)[0]
                     stream_url = best_audio.get("url") or stream_url
-                    codec = best_audio.get("acodec", "opus")
-                    bitrate = best_audio.get("abr", 160)
+                    raw_acodec = str(best_audio.get("acodec", "opus")).lower()
+                    if "opus" in raw_acodec:
+                        codec = "opus"
+                        format_str = "OPUS"
+                        sample_rate = 48000
+                    elif "mp4a" in raw_acodec or "aac" in raw_acodec:
+                        codec = "aac"
+                        format_str = "AAC"
+                        sample_rate = 44100
+                    else:
+                        codec = raw_acodec
+                        format_str = raw_acodec.upper()
+                        sample_rate = 48000
+                    try:
+                        bitrate = int(round(best_audio.get("abr") or 160))
+                    except Exception:
+                        bitrate = 160
                 else:
                     codec = "opus"
+                    format_str = "OPUS"
+                    sample_rate = 48000
                     bitrate = 128
 
                 result = {
@@ -181,13 +198,14 @@ class StreamResolver:
                     "artist": info.get("uploader", "") or info.get("artist", ""),
                     "duration": info.get("duration", 0),
                     "codec": codec,
-                    "format": "OPUS",
+                    "format": format_str,
                     "bitrate": bitrate,
-                    "sampleRate": 48000,
+                    "sampleRate": sample_rate,
                     "bitDepth": 16,
                     "isLossless": False,
-                    "qualityTier": "high",
+                    "qualityTier": "high" if bitrate >= 160 else "standard",
                     "source": "youtube",
+                    "addonName": f"YouTube Audio Direct ({bitrate}k {format_str})",
                     "thumbnail": info.get("thumbnail", "")
                 }
 
