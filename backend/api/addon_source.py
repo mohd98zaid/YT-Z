@@ -183,15 +183,18 @@ class AddonSourceResolver:
                                         clean_name = html.unescape(raw_name)
                                         
                                         if is_genuine_lossless:
-                                            addon_label = f"Studio Master Lossless ({codec.upper()})"
+                                            addon_label = f"Lossless Master ({codec.upper()})"
+                                            quality_tier = "hi-res" if bit_depth == 24 else "lossless"
                                         elif actual_bitrate >= 320:
-                                            addon_label = "JioSaavn Studio Master (320k AAC)"
+                                            addon_label = "JioSaavn HQ Stream (320k AAC)"
+                                            quality_tier = "high"
                                         else:
-                                            addon_label = f"JioSaavn Audio ({actual_bitrate}k {format_name})"
+                                            addon_label = f"JioSaavn Stream ({actual_bitrate}k {format_name})"
+                                            quality_tier = "standard"
 
                                         logger.info(f"Resolved stream for '{title}': {addon_label} ({codec.upper()} {actual_bitrate} kbps)")
                                         return {
-                                            "source": "alternative_hires",
+                                            "source": "jiosaavn_hq" if not is_genuine_lossless else "lossless_addon",
                                             "addon_name": addon_label,
                                             "is_lossless": is_genuine_lossless,
                                             "codec": codec,
@@ -199,7 +202,7 @@ class AddonSourceResolver:
                                             "bitrate": actual_bitrate,
                                             "sampleRate": sample_rate,
                                             "bitDepth": bit_depth,
-                                            "quality_tier": "hi-res" if is_genuine_lossless else "high",
+                                            "quality_tier": quality_tier,
                                             "streamUrl": stream_url,
                                             "title": clean_name,
                                             "artist": s.get("primaryArtists", artist),

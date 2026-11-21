@@ -105,10 +105,10 @@ class StreamResolver:
                         "bitrate": addon_stream["bitrate"],
                         "sampleRate": addon_stream.get("sampleRate", 44100),
                         "bitDepth": addon_stream.get("bitDepth", 16),
-                        "isLossless": addon_stream.get("is_lossless", True),
-                        "qualityTier": addon_stream.get("quality_tier", "lossless"),
+                        "isLossless": bool(addon_stream.get("is_lossless", False)),
+                        "qualityTier": addon_stream.get("quality_tier", "high" if addon_stream.get("bitrate", 0) >= 320 else "standard"),
                         "source": addon_stream.get("source", "addon"),
-                        "addonName": addon_stream.get("addon_name", "Hi-Res Alternative Master"),
+                        "addonName": addon_stream.get("addon_name", "High Quality Stream (320k AAC)" if addon_stream.get("bitrate", 0) >= 320 else "External Stream"),
                     }
                     _STREAM_CACHE[cache_key] = {
                         "data": result,
@@ -150,10 +150,10 @@ class StreamResolver:
                                 "bitrate": addon_stream["bitrate"],
                                 "sampleRate": addon_stream.get("sampleRate", 44100),
                                 "bitDepth": addon_stream.get("bitDepth", 16),
-                                "isLossless": addon_stream.get("is_lossless", True),
-                                "qualityTier": addon_stream.get("quality_tier", "lossless"),
+                                "isLossless": bool(addon_stream.get("is_lossless", False)),
+                                "qualityTier": addon_stream.get("quality_tier", "high" if addon_stream.get("bitrate", 0) >= 320 else "standard"),
                                 "source": addon_stream.get("source", "addon"),
-                                "addonName": addon_stream.get("addon_name", "Hi-Res Alternative Master"),
+                                "addonName": addon_stream.get("addon_name", "High Quality Stream (320k AAC)" if addon_stream.get("bitrate", 0) >= 320 else "External Stream"),
                             }
                             _STREAM_CACHE[cache_key] = {"data": result, "expires_at": now + CACHE_TTL}
                             return result
