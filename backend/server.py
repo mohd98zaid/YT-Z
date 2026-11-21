@@ -56,6 +56,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def add_no_cache_to_html(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path in ("/", "/index.html") or response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 # Initialize Core Subsystems
 config_mgr = ConfigManager()
 db_mgr = DatabaseManager()
@@ -935,8 +945,34 @@ async def websocket_endpoint(websocket: WebSocket):
 # ==================== Static Frontend Serving ====================
 
 DIST_DIR = ROOT_DIR / "frontend" / "dist"
+
 if DIST_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="frontend")
+    if (DIST_DIR / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        target = (DIST_DIR / full_path).resolve()
+        if str(target).startswith(str(DIST_DIR.resolve())) and target.is_file():
+            if target.suffix == ".html":
+                return FileResponse(
+                    str(target),
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0",
+                    }
+                )
+            return FileResponse(str(target))
+        index_file = DIST_DIR / "index.html"
+        return FileResponse(
+            str(index_file),
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
 
 def run_server(host: str = "0.0.0.0", port: int = 47892):
     lan_ip = get_lan_ip()
