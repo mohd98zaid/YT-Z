@@ -239,46 +239,70 @@ class AddonSourceResolver:
             req_headers["X-Addon-Key"] = api_key
 
         base_url = endpoint.rstrip("/")
+        cand_bases = [base_url]
+        if "/music" in base_url:
+            cand_bases.append(base_url.replace("/music", "/eclipse"))
+            cand_bases.append(base_url.replace("/music", ""))
+        elif "/eclipse" in base_url:
+            cand_bases.append(base_url.replace("/eclipse", "/music"))
+            cand_bases.append(base_url.replace("/eclipse", ""))
+        else:
+            cand_bases.append(f"{base_url}/eclipse")
+            cand_bases.append(f"{base_url}/music")
 
-        # 1. Community Addon API Protocol (Fast 2.0s timeout)
-        try:
-            search_url = f"{base_url}/search?q={urllib.parse.quote(search_query)}"
-            resp = requests.get(search_url, headers=req_headers, timeout=2.0)
-            if resp.status_code in (401, 403, 404):
-                # Endpoint is rejecting authentication or is broken, abort this source immediately
-                return None
+        queries_to_try = [search_query]
+        if clean_title and clean_title not in queries_to_try:
+            queries_to_try.append(clean_title)
 
-            if resp.status_code == 200:
-                data = resp.json()
-                raw_tracks = data.get("tracks") or data.get("results") or data.get("items") or []
-                if isinstance(raw_tracks, list) and len(raw_tracks) > 0:
-                    candidates = self._rank_candidates(raw_tracks, clean_title, clean_artist)
-                    for candidate in candidates[:3]:
-                        track_id = candidate.get("id") or candidate.get("trackId")
-                        if not track_id:
-                            continue
+        # 1. BitChord & Eclipse Addon Protocol (/search?q={query} -> /stream/{id})
+        for cand_base in cand_bases:
+            cand_clean = cand_base.replace("/manifest.json", "").rstrip("/")
+            for q_text in queries_to_try:
+                try:
+                    search_url = f"{cand_clean}/search?q={urllib.parse.quote(q_text)}"
+                    resp = requests.get(search_url, headers=req_headers, timeout=3.5)
+                    if resp.status_code in (401, 403):
+                        continue
+                    if resp.status_code == 200 and "application/json" in resp.headers.get("Content-Type", "").lower():
+                        data = resp.json()
+                        raw_tracks = data.get("tracks") or data.get("results") or data.get("items") or []
+                        if isinstance(raw_tracks, list) and len(raw_tracks) > 0:
+                            candidates = self._rank_candidates(raw_tracks, clean_title, clean_artist)
+                            for candidate in candidates[:3]:
+                                track_id = candidate.get("id") or candidate.get("trackId")
+                                if not track_id:
+                                    continue
 
-                        # Query direct stream endpoint
-                        s_url = f"{base_url}/stream/{urllib.parse.quote(str(track_id))}"
-                        try:
-                            s_resp = requests.get(s_url, headers=req_headers, timeout=2.0)
-                            if s_resp.status_code == 200:
-                                s_data = s_resp.json()
-                                media_url = s_data.get("url") or s_data.get("streamUrl") or s_data.get("stream_url")
-                                if media_url and (media_url.startswith("http://") or media_url.startswith("https://")):
-                                    if self._verify_stream_url(media_url, req_headers):
-                                        merged = {**candidate, **s_data}
-                                        return self._format_stream_result(
-                                            merged,
-                                            addon_name,
-                                            candidate.get("title", title),
-                                            candidate.get("artist", artist),
-                                            media_url
-                                        )
-                        except Exception as se:
-                            logger.debug(f"Failed stream endpoint {s_url}: {se}")
-        except Exception as e:
-            logger.debug(f"Addon '{addon_name}' search failed: {e}")
+                                s_url = f"{cand_clean}/stream/{urllib.parse.quote(str(track_id))}"
+                                try:
+                                    s_resp = requests.get(s_url, headers=req_headers, timeout=6.0, allow_redirects=True)
+                                    if s_resp.status_code == 200:
+                                        if "application/json" in s_resp.headers.get("Content-Type", "").lower():
+                                            s_data = s_resp.json()
+                                            media_url = s_data.get("url") or s_data.get("streamUrl") or s_data.get("stream_url")
+                                        else:
+                                            s_data = {}
+                                            media_url = s_resp.url
+                                    elif s_resp.status_code in (206, 302):
+                                        s_data = {}
+                                        media_url = s_resp.headers.get("Location") or s_resp.url
+                                    else:
+                                        continue
+
+                                    if media_url and (media_url.startswith("http://") or media_url.startswith("https://")):
+                                        if self._verify_stream_url(media_url, req_headers):
+                                            merged = {**candidate, **s_data}
+                                            return self._format_stream_result(
+                                                merged,
+                                                addon_name,
+                                                candidate.get("title", title),
+                                                candidate.get("artist", artist),
+                                                media_url
+                                            )
+                                except Exception as se:
+                                    logger.debug(f"Failed stream endpoint {s_url}: {se}")
+                except Exception as e:
+                    logger.debug(f"Addon '{addon_name}' search failed on {cand_clean}: {e}")
 
         # 2. Single-shot /resolve (Fast 2.0s timeout)
         try:
@@ -392,7 +416,7 @@ class AddonSourceResolver:
         try:
             probe_headers = dict(headers)
             probe_headers["Range"] = "bytes=0-15"
-            probe = requests.get(media_url, headers=probe_headers, timeout=1.5, stream=True)
+            probe = requests.get(media_url, headers=probe_headers, timeout=3.5, stream=True)
             if probe.status_code in (200, 206):
                 return True
             logger.debug(f"Stream probe returned non-200/206 status: {probe.status_code}")
@@ -423,25 +447,26 @@ class AddonSourceResolver:
         elif "mp3" in raw_codec or ".mp3" in stream_lower:
             codec = "mp3"
         else:
-            codec = raw_codec or "aac"
+            codec = raw_codec or "flac"
 
         # Bitrate parsing (handle bps like 320000 -> convert to kbps 320)
-        raw_bitrate = data.get("bitrate")
-        bitrate_kbps = 320
+        raw_bitrate = data.get("bitrate") or data.get("kbps")
         if raw_bitrate:
             try:
                 bitrate_num = int(raw_bitrate)
                 bitrate_kbps = bitrate_num // 1000 if bitrate_num > 10000 else bitrate_num
             except Exception:
-                bitrate_kbps = 320
+                bitrate_kbps = 1411 if codec in ("flac", "alac") else 320
+        elif codec in ("flac", "alac"):
+            bitrate_kbps = 1411
         elif codec == "opus":
             bitrate_kbps = 160
-        elif codec == "flac":
-            bitrate_kbps = 1411
+        else:
+            bitrate_kbps = 320
 
         is_lossless = codec in ("flac", "alac", "wav", "aiff")
-        bit_depth = int(data.get("bitDepth", 24 if (is_lossless and bitrate_kbps > 1500) else 16))
-        sample_rate = int(data.get("sampleRate", 96000 if (is_lossless and bit_depth == 24) else (48000 if codec == "opus" else 44100)))
+        bit_depth = int(data.get("bitDepth") or data.get("bit_depth") or (24 if (is_lossless and bitrate_kbps > 1500) else 16))
+        sample_rate = int(data.get("sampleRate") or data.get("sample_rate") or (48000 if bit_depth == 24 else 44100))
 
         display_name = addon_name
         if "pencarimovie" in str(addon_name).lower() or "pencari" in str(addon_name).lower():
