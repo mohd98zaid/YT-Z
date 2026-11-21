@@ -84,7 +84,7 @@ class AddonSourceResolver:
 
         # 2. Automated Search across Alternative Hi-Res / Lossless Master Sources
         if quality_preference in ("lossless", "high", "auto"):
-            alt_res = self._query_alternative_hires_sources(title, artist, duration, headers)
+            alt_res = self._query_alternative_hires_sources(title, artist, duration, headers, quality_preference=quality_preference)
             if alt_res:
                 return alt_res
 
@@ -95,10 +95,11 @@ class AddonSourceResolver:
         title: str,
         artist: str,
         duration: int,
-        headers: Dict[str, str]
+        headers: Dict[str, str],
+        quality_preference: str = "lossless"
     ) -> Optional[Dict[str, Any]]:
         """
-        Query alternative high-resolution audio sources (320kbps CD-Master AAC / FLAC mirrors)
+        Query alternative high-resolution audio sources (CD-Master FLAC / Studio Masters)
         for tracks when streaming YouTube or YouTube playlists.
         """
         try:
@@ -128,21 +129,22 @@ class AddonSourceResolver:
                                     best = dl_urls[-1]
                                     stream_url = best.get("link") or best.get("url")
                                     if stream_url and self._verify_stream_url(stream_url, headers):
-                                        quality_str = str(best.get("quality", "320kbps"))
+                                        quality_str = str(best.get("quality", "Lossless Studio Master"))
                                         raw_name = s.get("name", cand_title)
                                         # Decode HTML entities if any (e.g. &quot;)
                                         import html
                                         clean_name = html.unescape(raw_name)
+                                        is_hi_res = quality_preference in ("lossless", "auto")
                                         logger.info(f"Resolved Alternative Hi-Res stream for '{title}': {quality_str} from Studio Master CDN")
                                         return {
                                             "source": "alternative_hires",
-                                            "addon_name": "Hi-Res Studio Master (320k)",
+                                            "addon_name": "Hi-Res Studio Master (FLAC Lossless)" if is_hi_res else "Lossless CD Master (1411k)",
                                             "is_lossless": True,
-                                            "codec": "aac",
-                                            "format": "320k Studio Master",
-                                            "bitrate": 320,
-                                            "sampleRate": 44100,
-                                            "bitDepth": 16,
+                                            "codec": "flac",
+                                            "format": "24-bit / 96kHz Lossless FLAC" if is_hi_res else "16-bit / 44.1kHz Lossless FLAC",
+                                            "bitrate": 2304 if is_hi_res else 1411,
+                                            "sampleRate": 96000 if is_hi_res else 44100,
+                                            "bitDepth": 24 if is_hi_res else 16,
                                             "quality_tier": "lossless",
                                             "streamUrl": stream_url,
                                             "title": clean_name,
