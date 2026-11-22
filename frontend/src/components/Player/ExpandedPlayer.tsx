@@ -2018,9 +2018,6 @@ export const ExpandedPlayer: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Live Signal Path, Decoder to Output Modal */}
-      <AudioPipelineModal isOpen={enableStatsForNerds && showStatsForNerds} onClose={toggleStatsForNerds} />
     </div>
   );
 };
