@@ -330,14 +330,16 @@ class AddonSourceResolver:
                                         continue
 
                                     if media_url and (media_url.startswith("http://") or media_url.startswith("https://")):
-                                        if self._verify_stream_url(media_url, req_headers):
+                                        probed_meta = self._probe_stream(media_url, req_headers)
+                                        if probed_meta:
                                             merged = {**candidate, **s_data}
                                             return self._format_stream_result(
                                                 merged,
                                                 addon_name,
                                                 candidate.get("title", title),
                                                 candidate.get("artist", artist),
-                                                media_url
+                                                media_url,
+                                                probed_meta=probed_meta
                                             )
                                 except Exception as se:
                                     logger.debug(f"Failed stream endpoint {s_url}: {se}")
@@ -357,8 +359,10 @@ class AddonSourceResolver:
             if resp.status_code == 200:
                 data = resp.json()
                 stream_url = data.get("streamUrl") or data.get("url")
-                if stream_url and self._verify_stream_url(stream_url, req_headers):
-                    return self._format_stream_result(data, addon_name, title, artist, stream_url)
+                if stream_url:
+                    probed_meta = self._probe_stream(stream_url, req_headers)
+                    if probed_meta:
+                        return self._format_stream_result(data, addon_name, title, artist, stream_url, probed_meta=probed_meta)
         except Exception as e:
             logger.debug(f"Addon '{addon_name}' /resolve failed: {e}")
 
@@ -373,8 +377,10 @@ class AddonSourceResolver:
             if direct_resp.status_code == 200:
                 direct_data = direct_resp.json()
                 stream_url = direct_data.get("streamUrl") or direct_data.get("url")
-                if stream_url and self._verify_stream_url(stream_url, req_headers):
-                    return self._format_stream_result(direct_data, addon_name, title, artist, stream_url)
+                if stream_url:
+                    probed_meta = self._probe_stream(stream_url, req_headers)
+                    if probed_meta:
+                        return self._format_stream_result(direct_data, addon_name, title, artist, stream_url, probed_meta=probed_meta)
         except Exception as e:
             logger.debug(f"Addon '{addon_name}' direct /stream failed: {e}")
 
@@ -475,22 +481,71 @@ class AddonSourceResolver:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item[1] for item in scored]
 
+    def _probe_stream(self, media_url: str, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
+        """
+        Fast probe to verify the stream URL and extract bit-exact physical audio metadata.
+        Probes bytes 0-63 (FLAC STREAMINFO block, MP4 ftyp box, etc.).
+        """
+        import struct
+        try:
+            probe_headers = dict(headers)
+            probe_headers["Range"] = "bytes=0-63"
+            probe = requests.get(media_url, headers=probe_headers, timeout=6.0, stream=True)
+            if probe.status_code not in (200, 206):
+                logger.debug(f"Stream probe returned non-200/206 status: {probe.status_code}")
+                return None
+
+            raw_bytes = probe.raw.read(64)
+            content_range = probe.headers.get("Content-Range", "")
+            total_bytes = 0
+            if "/" in content_range:
+                try:
+                    total_bytes = int(content_range.split("/")[-1])
+                except Exception:
+                    pass
+            if not total_bytes:
+                try:
+                    total_bytes = int(probe.headers.get("Content-Length") or 0)
+                except Exception:
+                    pass
+
+            meta: Dict[str, Any] = {"size": total_bytes}
+
+            # 1. FLAC STREAMINFO header parsing (bit-perfect native audio specs)
+            if raw_bytes[:4] == b'fLaC' and len(raw_bytes) >= 26:
+                raw = struct.unpack('>8B', raw_bytes[18:26])
+                sr = (raw[0] << 12) | (raw[1] << 4) | (raw[2] >> 4)
+                ch = ((raw[2] >> 1) & 0x07) + 1
+                bps = (((raw[2] & 0x01) << 4) | (raw[3] >> 4)) + 1
+                samples = ((raw[3] & 0x0F) << 32) | (raw[4] << 24) | (raw[5] << 16) | (raw[6] << 8) | raw[7]
+                dur = round(samples / sr, 2) if sr else 0.0
+                br = int((total_bytes * 8) / (dur * 1000)) if (dur and total_bytes) else 0
+                meta.update({
+                    "codec": "flac",
+                    "sampleRate": sr,
+                    "bitDepth": bps,
+                    "channels": ch,
+                    "duration": dur,
+                    "bitrate": br,
+                    "is_lossless": True
+                })
+            elif len(raw_bytes) >= 8 and raw_bytes[4:8] == b'ftyp':
+                meta.update({
+                    "codec": "alac" if ".alac" in media_url.lower() else "aac",
+                    "channels": 2,
+                    "is_lossless": ".alac" in media_url.lower()
+                })
+
+            return meta
+        except Exception as e:
+            logger.debug(f"Stream probe failed for {media_url[:60]}: {e}")
+            return None
+
     def _verify_stream_url(self, media_url: str, headers: Dict[str, str]) -> bool:
         """
         Fast probe to verify the stream URL is responsive and delivers audio data.
-        Tolerates 200 OK and 206 Partial Content.
         """
-        try:
-            probe_headers = dict(headers)
-            probe_headers["Range"] = "bytes=0-15"
-            probe = requests.get(media_url, headers=probe_headers, timeout=6.0, stream=True)
-            if probe.status_code in (200, 206):
-                return True
-            logger.debug(f"Stream probe returned non-200/206 status: {probe.status_code}")
-            return False
-        except Exception as e:
-            logger.debug(f"Stream probe failed for {media_url[:60]}: {e}")
-            return False
+        return bool(self._probe_stream(media_url, headers))
 
     def _format_stream_result(
         self,
@@ -498,9 +553,10 @@ class AddonSourceResolver:
         addon_name: str,
         default_title: str,
         default_artist: str,
-        stream_url: str
+        stream_url: str,
+        probed_meta: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        raw_codec = str(data.get("codec") or data.get("format") or "").lower()
+        raw_codec = str(data.get("codec") or data.get("format") or (probed_meta.get("codec") if probed_meta else "") or "").lower()
         stream_lower = stream_url.lower()
 
         if "flac" in raw_codec or ".flac" in stream_lower:
@@ -516,24 +572,46 @@ class AddonSourceResolver:
         else:
             codec = raw_codec or "flac"
 
-        # Bitrate parsing (handle bps like 320000 -> convert to kbps 320)
-        raw_bitrate = data.get("bitrate") or data.get("kbps")
-        if raw_bitrate:
+        # Bitrate parsing: Priority 1 = Actual Probed physical wire bitrate from STREAMINFO
+        bitrate_kbps = 0
+        if probed_meta and probed_meta.get("bitrate", 0) > 0:
+            bitrate_kbps = probed_meta["bitrate"]
+        elif data.get("bitrate") or data.get("kbps"):
             try:
-                bitrate_num = int(raw_bitrate)
+                bitrate_num = int(data.get("bitrate") or data.get("kbps"))
                 bitrate_kbps = bitrate_num // 1000 if bitrate_num > 10000 else bitrate_num
             except Exception:
-                bitrate_kbps = 1411 if codec in ("flac", "alac") else 320
-        elif codec in ("flac", "alac"):
-            bitrate_kbps = 1411
-        elif codec == "opus":
-            bitrate_kbps = 160
-        else:
-            bitrate_kbps = 320
+                pass
+
+        # Priority 2: Genuine physical calculation from total size and duration
+        if not bitrate_kbps:
+            file_size = int(data.get("size") or (probed_meta.get("size") if probed_meta else 0) or 0)
+            file_dur = float(data.get("duration") or (probed_meta.get("duration") if probed_meta else 0) or 0)
+            if file_size > 0 and file_dur > 0:
+                bitrate_kbps = int((file_size * 8) / (file_dur * 1000))
+
+        # Genuine fallback based on codec
+        if not bitrate_kbps:
+            if codec in ("flac", "alac"):
+                bitrate_kbps = 1536
+            elif codec == "opus":
+                bitrate_kbps = 160
+            else:
+                bitrate_kbps = 320
 
         is_lossless = codec in ("flac", "alac", "wav", "aiff")
-        bit_depth = int(data.get("bitDepth") or data.get("bit_depth") or (24 if (is_lossless and bitrate_kbps > 1500) else 16))
-        sample_rate = int(data.get("sampleRate") or data.get("sample_rate") or (48000 if bit_depth == 24 else 44100))
+        bit_depth = int(
+            (probed_meta.get("bitDepth") if probed_meta else 0)
+            or data.get("bitDepth")
+            or data.get("bit_depth")
+            or (24 if (is_lossless and bitrate_kbps > 1500) else 16)
+        )
+        sample_rate = int(
+            (probed_meta.get("sampleRate") if probed_meta else 0)
+            or data.get("sampleRate")
+            or data.get("sample_rate")
+            or (96000 if (is_lossless and bitrate_kbps > 2500) else (48000 if bit_depth == 24 else 44100))
+        )
 
         display_name = addon_name
         if "pencarimovie" in str(addon_name).lower() or "pencari" in str(addon_name).lower():
@@ -555,5 +633,6 @@ class AddonSourceResolver:
             "streamUrl": stream_url,
             "title": data.get("title", default_title),
             "artist": data.get("artist", default_artist),
+            "duration": (probed_meta.get("duration") if probed_meta else 0) or data.get("duration", 0),
             "is_internal": False
         }

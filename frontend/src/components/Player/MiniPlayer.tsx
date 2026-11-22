@@ -200,7 +200,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ mode = 'both' }) => {
                   </span>
                 ) : (
                   <span className="shrink-0 px-1 py-0.2 rounded text-[8px] font-mono text-white/70 bg-white/10 border border-white/15">
-                    {audioStats?.codec?.toUpperCase() || 'AAC'} {audioStats?.bitrate ? `${audioStats.bitrate}k` : '320k'}
+                    {audioStats?.codec?.toUpperCase() || 'OPUS'} {audioStats?.bitrate ? `${audioStats.bitrate}k` : (audioStats?.codec === 'opus' ? '160k' : '320k')}
                   </span>
                 )}
               </div>
