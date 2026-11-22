@@ -4,7 +4,6 @@ Interfaces with configured module sources / add-ons (Lossless Bridge, Eclipse, F
 to resolve bit-perfect 24-bit/96kHz and 16-bit/44.1kHz FLAC audio streams,
 with seamless fallback to YouTube Music 256k Opus.
 """
-import time
 import logging
 import urllib.parse
 import concurrent.futures

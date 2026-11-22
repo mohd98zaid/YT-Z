@@ -9,7 +9,7 @@ import time
 import uuid
 import logging
 import requests
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from backend.core.database import DatabaseManager
 
 logger = logging.getLogger("YTZ.Plugins")

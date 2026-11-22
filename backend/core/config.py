@@ -2,7 +2,6 @@
 Configuration management for YT-Z.
 Stores settings in user's home directory: ~/.ytz/config.json
 """
-import os
 import json
 import logging
 from pathlib import Path

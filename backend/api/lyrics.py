@@ -4,7 +4,6 @@ Supports LRCLIB, lrc.red (syllable TTML), KuGou, and Genius.
 Parses syllable/word-synced, line-synced LRC, and plain lyrics.
 """
 import re
-import json
 import logging
 from typing import Dict, Any, List, Optional
 import xml.etree.ElementTree as ET

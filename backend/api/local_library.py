@@ -3,7 +3,6 @@ Local Music Library Scanner & File Bridge for YT-Z.
 Scans downloaded audio files and local music folders,
 extracts tags, and provides endpoints to stream or reveal in Explorer.
 """
-import os
 import sys
 import subprocess
 import logging

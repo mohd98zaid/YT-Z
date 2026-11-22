@@ -3,8 +3,6 @@ Industrial yt-dlp Downloader Engine for YT-Z.
 Concurrent downloads, video (4K/1080p/720p) and audio (MP3 320k/FLAC/M4A/OPUS/WAV),
 metadata, thumbnail, and lyrics embedding, progress event hooks.
 """
-import os
-import sys
 import time
 import uuid
 import logging

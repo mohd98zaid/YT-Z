@@ -4,7 +4,6 @@ Stores streamed audio files on disk with HTTP 206 Partial Content support,
 enabling 0ms instant playback for cached tracks, scrubbing without network latency,
 and seamless gapless 2-song caching.
 """
-import os
 import time
 import json
 import logging

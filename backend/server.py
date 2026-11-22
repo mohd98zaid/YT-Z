@@ -12,11 +12,11 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Body, Response, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 import requests
 import uvicorn
 

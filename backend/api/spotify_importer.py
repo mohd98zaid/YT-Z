@@ -7,7 +7,7 @@ import re
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 import requests
 from backend.api.ytmusic import YTMusicService
 from backend.core.database import DatabaseManager
