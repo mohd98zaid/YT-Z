@@ -292,8 +292,8 @@ async def stream_audio_proxy(
 
     resp = None
     try:
-        # Strict 4.0s timeout for initial connection to avoid long client stalls
-        resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=4.0)
+        # Generous 10.0s timeout for initial connection to accommodate heavy studio FLAC/ALAC masters (40MB-110MB)
+        resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=10.0)
         if resp.status_code not in (200, 206):
             raise ValueError(f"Upstream returned non-200/206 status: {resp.status_code}")
     except Exception as primary_err:

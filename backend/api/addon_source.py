@@ -10,6 +10,7 @@ import urllib.parse
 import concurrent.futures
 from typing import Dict, Any, Optional, List
 import requests
+import re
 from backend.core.database import DatabaseManager
 
 logger = logging.getLogger("YTZ.AddonSource")
@@ -43,8 +44,10 @@ class AddonSourceResolver:
             if p.get("type") == "audio_source" and bool(p.get("enabled"))
         ]
 
-        clean_title = title.split("(")[0].split("[")[0].strip()
-        clean_artist = artist.split(",")[0].split("&")[0].split("feat")[0].strip()
+        import re
+        clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', title)
+        clean_title = re.split(r'\||–|—|-', clean_title)[0].strip()
+        clean_artist = re.split(r',|&|feat|ft\.', artist, flags=re.IGNORECASE)[0].strip()
         search_query = f"{clean_title} {clean_artist}".strip() if clean_artist else clean_title
 
         headers = {
@@ -53,6 +56,7 @@ class AddonSourceResolver:
         }
 
         # Query all enabled audio source add-ons concurrently in parallel
+        best_lossy_candidate = None
         if audio_sources:
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(audio_sources))) as executor:
                 future_to_source = {
@@ -75,18 +79,29 @@ class AddonSourceResolver:
                     try:
                         res = future.result()
                         if res:
-                            # Cancel remaining background queries immediately
-                            for f in future_to_source:
-                                f.cancel()
-                            return res
+                            if res.get("is_lossless"):
+                                # Found verified bit-perfect FLAC/ALAC stream! Return immediately.
+                                for f in future_to_source:
+                                    f.cancel()
+                                return res
+                            elif not best_lossy_candidate:
+                                best_lossy_candidate = res
                     except Exception as e:
                         logger.debug(f"Source query exception: {e}")
 
         # 2. Automated Search across Alternative Hi-Res / Lossless Master Sources
+        alt_res = None
         if quality_preference in ("lossless", "high", "auto"):
             alt_res = self._query_alternative_hires_sources(title, artist, duration, headers, quality_preference=quality_preference)
-            if alt_res:
+            if alt_res and alt_res.get("is_lossless"):
                 return alt_res
+
+        # 3. If no bit-perfect lossless master found anywhere, return best lossy candidate (or alt 320k fallback)
+        if best_lossy_candidate:
+            return best_lossy_candidate
+
+        if alt_res:
+            return alt_res
 
         return None
 
@@ -106,7 +121,29 @@ class AddonSourceResolver:
             from backend.api.lyrics import generate_search_candidates
             candidates = generate_search_candidates(title, artist)
         except Exception:
-            candidates = [(title.split("(")[0].split("|")[0].strip(), artist.split("-")[0].strip())]
+            candidates = [(clean_title, clean_artist)]
+
+        # 1. Query Built-In Lossless Master Bridge (PencariMusic / Eclipse) directly for FLAC
+        if quality_preference in ("lossless", "high", "auto") and candidates:
+            p_source = {
+                "name": "PencariMusic",
+                "endpoint": "https://stream.pencarimovie.com/66ff097863dedb7ccd8401d5ffe616f3/eclipse",
+                "api_key": ""
+            }
+            cand_t, cand_a = candidates[0]
+            p_res = self._query_single_source(
+                p_source,
+                cand_t,
+                cand_a,
+                f"{cand_t} {cand_a}".strip(),
+                duration,
+                quality_preference,
+                title,
+                artist,
+                headers
+            )
+            if p_res and p_res.get("is_lossless"):
+                return p_res
 
         api_mirrors = [
             "https://jiosaavn-api-gold.vercel.app/search/songs?query=",
@@ -253,6 +290,9 @@ class AddonSourceResolver:
         queries_to_try = [search_query]
         if clean_title and clean_title not in queries_to_try:
             queries_to_try.append(clean_title)
+        raw_clean = re.sub(r'\(.*?\)|\[.*?\]', '', title).split('|')[0].strip()
+        if raw_clean and raw_clean not in queries_to_try:
+            queries_to_try.append(raw_clean)
 
         # 1. BitChord & Eclipse Addon Protocol (/search?q={query} -> /stream/{id})
         for cand_base in cand_bases:
@@ -267,7 +307,7 @@ class AddonSourceResolver:
                         data = resp.json()
                         raw_tracks = data.get("tracks") or data.get("results") or data.get("items") or []
                         if isinstance(raw_tracks, list) and len(raw_tracks) > 0:
-                            candidates = self._rank_candidates(raw_tracks, clean_title, clean_artist)
+                            candidates = self._rank_candidates(raw_tracks, clean_title, clean_artist, quality_preference)
                             for candidate in candidates[:3]:
                                 track_id = candidate.get("id") or candidate.get("trackId")
                                 if not track_id:
@@ -376,7 +416,14 @@ class AddonSourceResolver:
 
         return None
 
-    def _rank_candidates(self, tracks: List[Dict[str, Any]], clean_title: str, clean_artist: str) -> List[Dict[str, Any]]:
+    def _rank_candidates(
+        self,
+        tracks: List[Dict[str, Any]],
+        clean_title: str,
+        clean_artist: str,
+        quality_preference: str = "lossless"
+    ) -> List[Dict[str, Any]]:
+        import re
         target_t = clean_title.lower().strip()
         target_a = clean_artist.lower().strip()
         scored = []
@@ -385,23 +432,43 @@ class AddonSourceResolver:
             c_artist = str(t.get("artist", "")).lower().strip()
             score = 0
 
-            # Title matching
+            # Title matching: Must match title strongly so irrelevant songs by the same artist aren't chosen
+            t_words = set(re.findall(r'\w+', target_t))
+            c_words = set(re.findall(r'\w+', c_title))
+
             if target_t == c_title:
-                score += 30
+                score += 100
             elif target_t in c_title or c_title in target_t:
-                score += 15
+                score += 70
+            elif t_words and c_words:
+                overlap = len(t_words.intersection(c_words))
+                ratio = overlap / len(t_words)
+                if ratio >= 0.7:
+                    score += int(ratio * 60)
+                elif ratio >= 0.5:
+                    score += int(ratio * 30)
+                else:
+                    score -= 50
+            else:
+                score -= 60
 
             # Artist matching
-            if target_a and target_a in c_artist:
-                score += 15
+            if target_a and (target_a in c_artist or c_artist in target_a):
+                score += 25
             elif not target_a:
                 score += 5
 
-            # Prefer verified lossless/FLAC formats
+            # Heavily prioritize verified lossless FLAC / ALAC formats!
             quality = str(t.get("audioQuality", "")).upper()
             fmt = str(t.get("format", "")).lower()
-            if quality == "LOSSLESS" or "HIRES" in quality or fmt in ("flac", "alac"):
-                score += 10
+            is_flac = quality == "LOSSLESS" or "HIRES" in quality or fmt in ("flac", "alac")
+            if is_flac:
+                score += 100
+                size = int(t.get("size") or 0)
+                if size > 30 * 1024 * 1024:
+                    score += 25
+            elif quality_preference in ("lossless", "high", "auto"):
+                score -= 40
 
             scored.append((score, t))
 
@@ -416,7 +483,7 @@ class AddonSourceResolver:
         try:
             probe_headers = dict(headers)
             probe_headers["Range"] = "bytes=0-15"
-            probe = requests.get(media_url, headers=probe_headers, timeout=3.5, stream=True)
+            probe = requests.get(media_url, headers=probe_headers, timeout=6.0, stream=True)
             if probe.status_code in (200, 206):
                 return True
             logger.debug(f"Stream probe returned non-200/206 status: {probe.status_code}")

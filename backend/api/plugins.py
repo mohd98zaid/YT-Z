@@ -52,6 +52,18 @@ DEFAULT_PLUGINS = [
         "is_builtin": True
     },
     {
+        "id": "pencarimusic",
+        "name": "PencariMusic (Lossless Masters)",
+        "type": "audio_source",
+        "description": "Bit-perfect FLAC/ALAC 24-bit Hi-Res & 16-bit Lossless streaming powered by PencariMusic & Eclipse engine.",
+        "endpoint": "https://stream.pencarimovie.com/66ff097863dedb7ccd8401d5ffe616f3/music",
+        "enabled": True,
+        "status": "active",
+        "latency_ms": 45,
+        "icon": "Disc",
+        "is_builtin": True
+    },
+    {
         "id": "lossless-bridge",
         "name": "Lossless Bridge (Hi-Res FLAC)",
         "type": "audio_source",
