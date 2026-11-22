@@ -347,7 +347,7 @@ async def stream_audio_proxy(
     }
     if "Content-Range" in resp.headers:
         headers["Content-Range"] = resp.headers["Content-Range"]
-    if "Content-Length" in resp.headers:
+    if "Content-Length" in resp.headers and resp.status_code == 206:
         headers["Content-Length"] = resp.headers["Content-Length"]
 
     # Determine if we should record to disk cache (full file requests from byte 0)
