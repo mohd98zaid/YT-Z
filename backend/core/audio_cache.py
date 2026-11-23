@@ -53,14 +53,26 @@ class AudioCacheManager:
             return None
 
     def store_file(self, video_id: str, temp_path: Path, metadata: Dict[str, Any]) -> bool:
-        """Atomically promote a downloaded temp file into the cache."""
+        """Atomically promote a downloaded temp file into the cache with Windows locking resilience."""
         audio_file, meta_file, _ = self.get_file_paths(video_id)
         try:
             with self._lock:
                 if temp_path.exists() and temp_path.stat().st_size > 32 * 1024:
                     if audio_file.exists():
-                        audio_file.unlink(missing_ok=True)
-                    temp_path.rename(audio_file)
+                        try:
+                            audio_file.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                    # On Windows, try atomic rename, falling back to copy+unlink if handles are still releasing
+                    try:
+                        temp_path.rename(audio_file)
+                    except (PermissionError, OSError):
+                        import shutil
+                        shutil.copy2(str(temp_path), str(audio_file))
+                        try:
+                            temp_path.unlink(missing_ok=True)
+                        except Exception:
+                            pass
                     metadata["size_bytes"] = audio_file.stat().st_size
                     metadata["last_accessed"] = time.time()
                     metadata["cached_at"] = time.time()

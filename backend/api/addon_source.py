@@ -306,7 +306,7 @@ class AddonSourceResolver:
                         data = resp.json()
                         raw_tracks = data.get("tracks") or data.get("results") or data.get("items") or []
                         if isinstance(raw_tracks, list) and len(raw_tracks) > 0:
-                            candidates = self._rank_candidates(raw_tracks, clean_title, clean_artist, quality_preference)
+                            candidates = self._rank_candidates(raw_tracks, clean_title, clean_artist, quality_preference, target_duration=duration)
                             for candidate in candidates[:3]:
                                 track_id = candidate.get("id") or candidate.get("trackId")
                                 if not track_id:
@@ -426,56 +426,71 @@ class AddonSourceResolver:
         tracks: List[Dict[str, Any]],
         clean_title: str,
         clean_artist: str,
-        quality_preference: str = "lossless"
+        quality_preference: str = "lossless",
+        target_duration: int = 0
     ) -> List[Dict[str, Any]]:
         import re
         target_t = clean_title.lower().strip()
         target_a = clean_artist.lower().strip()
+        t_words = set(re.findall(r'\w+', target_t))
+
         scored = []
         for t in tracks:
             c_title = str(t.get("title", "")).lower().strip()
             c_artist = str(t.get("artist", "")).lower().strip()
+            c_words = set(re.findall(r'\w+', c_title))
             score = 0
 
-            # Title matching: Must match title strongly so irrelevant songs by the same artist aren't chosen
-            t_words = set(re.findall(r'\w+', target_t))
-            c_words = set(re.findall(r'\w+', c_title))
-
+            # 1. Title matching: Must match title strongly so irrelevant songs aren't chosen
             if target_t == c_title:
-                score += 100
+                score += 120
             elif target_t in c_title or c_title in target_t:
-                score += 70
+                score += 80
             elif t_words and c_words:
                 overlap = len(t_words.intersection(c_words))
                 ratio = overlap / len(t_words)
                 if ratio >= 0.7:
-                    score += int(ratio * 60)
+                    score += int(ratio * 70)
                 elif ratio >= 0.5:
-                    score += int(ratio * 30)
+                    score += int(ratio * 35)
                 else:
-                    score -= 50
+                    score -= 150
             else:
-                score -= 60
+                score -= 200
 
-            # Artist matching
+            # 2. Duration verification: Discard completely mismatched track lengths
+            if target_duration and target_duration > 0:
+                c_dur = float(t.get("duration") or t.get("durationSeconds") or 0)
+                if c_dur > 0:
+                    dur_diff = abs(c_dur - target_duration)
+                    if dur_diff <= 8:
+                        score += 50
+                    elif dur_diff <= 20:
+                        score += 25
+                    elif dur_diff > 35 and (dur_diff / target_duration) > 0.20:
+                        score -= 300
+
+            # 3. Artist matching
             if target_a and (target_a in c_artist or c_artist in target_a):
-                score += 25
+                score += 35
             elif not target_a:
                 score += 5
 
-            # Heavily prioritize verified lossless FLAC / ALAC formats!
+            # 4. Format & Lossless priority
             quality = str(t.get("audioQuality", "")).upper()
             fmt = str(t.get("format", "")).lower()
             is_flac = quality == "LOSSLESS" or "HIRES" in quality or fmt in ("flac", "alac")
             if is_flac:
-                score += 100
+                score += 40
                 size = int(t.get("size") or 0)
-                if size > 30 * 1024 * 1024:
-                    score += 25
+                if size > 15 * 1024 * 1024:
+                    score += 15
             elif quality_preference in ("lossless", "high", "auto"):
-                score -= 40
+                score -= 30
 
-            scored.append((score, t))
+            # Only accept candidates with a positive match score >= 50
+            if score >= 50:
+                scored.append((score, t))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item[1] for item in scored]

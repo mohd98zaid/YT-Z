@@ -352,7 +352,8 @@ async def stream_audio_proxy(
 
     # Determine if we should record to disk cache (full file requests from byte 0)
     is_full_request = (not range_header) or range_header.startswith("bytes=0-")
-    _, _, part_file = audio_cache.get_file_paths(video_id)
+    safe_id = "".join(c for c in video_id if c.isalnum() or c in ("-", "_"))
+    part_file = audio_cache.cache_dir / f"{safe_id}.stream.part"
     cache_file_handle = None
     if is_full_request:
         try:
@@ -426,7 +427,8 @@ async def preload_track_audio(
             if not stream_info or not stream_info.get("streamUrl"):
                 return
             url = stream_info["streamUrl"]
-            _, _, part_file = audio_cache.get_file_paths(video_id)
+            safe_id = "".join(c for c in video_id if c.isalnum() or c in ("-", "_"))
+            part_file = audio_cache.cache_dir / f"{safe_id}.preload.part"
             req_headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
