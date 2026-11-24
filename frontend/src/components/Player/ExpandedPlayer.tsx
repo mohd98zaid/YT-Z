@@ -1504,8 +1504,7 @@ export const ExpandedPlayer: React.FC = () => {
 
           <button
             onClick={togglePlay}
-            disabled={isLoading}
-            className="w-14 h-14 rounded-full bg-primary hover:bg-primary-hover text-white flex items-center justify-center shadow-xl shadow-primary/35 active:scale-90 transition-all"
+            className="w-14 h-14 rounded-full bg-primary hover:bg-primary-hover text-white flex items-center justify-center shadow-xl shadow-primary/35 active:scale-90 transition-all cursor-pointer"
             title={isPlaying ? "Pause" : "Play"}
           >
             {isLoading ? (
@@ -1804,8 +1803,7 @@ export const ExpandedPlayer: React.FC = () => {
 
             <button
               onClick={togglePlay}
-              disabled={isLoading}
-              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-primary hover:bg-primary-hover text-white flex items-center justify-center shadow-xl shadow-primary/30 hover:scale-105 active:scale-95 transition-all"
+              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-primary hover:bg-primary-hover text-white flex items-center justify-center shadow-xl shadow-primary/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
             >
               {isLoading ? (
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />

@@ -247,7 +247,6 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ mode = 'both' }) => {
 
             <button
               onClick={togglePlay}
-              disabled={isLoading}
               className="w-9 h-9 rounded-full bg-white text-zinc-950 flex items-center justify-center active:scale-90 transition-transform shadow-lg cursor-pointer hover:bg-zinc-100"
               title={isPlaying ? 'Pause' : 'Play'}
             >
@@ -411,8 +410,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ mode = 'both' }) => {
             {/* Play / Pause Button - Solid High-Contrast White Circle */}
             <button
               onClick={togglePlay}
-              disabled={isLoading}
-              className="w-10 h-10 rounded-full bg-white text-zinc-950 flex items-center justify-center transition-all hover:scale-105 active:scale-95 disabled:opacity-50 cursor-pointer shadow-md hover:bg-zinc-100"
+              className="w-10 h-10 rounded-full bg-white text-zinc-950 flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-md hover:bg-zinc-100"
               title={isPlaying ? 'Pause' : 'Play'}
             >
               {isLoading ? (

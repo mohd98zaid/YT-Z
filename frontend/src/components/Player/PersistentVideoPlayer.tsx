@@ -83,9 +83,11 @@ export const PersistentVideoPlayer: React.FC = () => {
           if (data.info.playerState === 1 || data.info.currentTime > 0) {
             setHasPlaybackStarted(true);
             setShowDirectPrompt(false);
-            usePlayerStore.setState({ isPlaying: true, isVideoMode: true, activeVideoSource: 'youtube_video' });
+            usePlayerStore.setState({ isPlaying: true, isVideoMode: true, activeVideoSource: 'youtube_video', isLoading: false });
           } else if (data.info.playerState === 2) {
-            usePlayerStore.setState({ isPlaying: false });
+            usePlayerStore.setState({ isPlaying: false, isLoading: false });
+          } else if (data.info.playerState === 3) {
+            usePlayerStore.setState({ isLoading: true });
           }
           if (typeof data.info.currentTime === 'number') {
             usePlayerStore.setState({
@@ -222,10 +224,16 @@ export const PersistentVideoPlayer: React.FC = () => {
           onPlaying={() => {
             setHasPlaybackStarted(true);
             setShowDirectPrompt(false);
-            usePlayerStore.setState({ isPlaying: true, isVideoMode: true, activeVideoSource: 'youtube_video' });
+            usePlayerStore.setState({ isPlaying: true, isVideoMode: true, activeVideoSource: 'youtube_video', isLoading: false });
+          }}
+          onWaiting={() => {
+            usePlayerStore.setState({ isLoading: true });
+          }}
+          onCanPlay={() => {
+            usePlayerStore.setState({ isLoading: false });
           }}
           onPause={() => {
-            usePlayerStore.setState({ isPlaying: false });
+            usePlayerStore.setState({ isPlaying: false, isLoading: false });
           }}
           onTimeUpdate={(e) => {
             const v = e.currentTarget;

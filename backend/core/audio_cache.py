@@ -119,12 +119,17 @@ class AudioCacheManager:
 
         # Parse HTTP Range Header: bytes=START-END
         try:
+            from fastapi.responses import Response
             byte_range = range_header.replace("bytes=", "").strip()
             parts = byte_range.split("-")
             start = int(parts[0]) if parts[0] else 0
             end = int(parts[1]) if len(parts) > 1 and parts[1] else file_size - 1
+            if start >= file_size:
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
             if end >= file_size:
                 end = file_size - 1
+            if start > end:
+                start = 0
             content_length = (end - start) + 1
 
             def range_generator() -> Generator[bytes, None, None]:

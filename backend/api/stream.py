@@ -117,12 +117,22 @@ class StreamResolver:
                     return result
 
         # 2. Extract YouTube Stream Information
-        url = f"https://www.youtube.com/watch?v={video_id}"
+        is_valid_yt_id = len(video_id) == 11 and not any(c in video_id for c in " /\\?&=#")
+        if is_valid_yt_id:
+            url = f"https://www.youtube.com/watch?v={video_id}"
+        elif title or artist:
+            q_search = f"{title} {artist}".strip()
+            url = f"ytsearch1:{q_search}"
+        else:
+            url = f"https://www.youtube.com/watch?v={video_id}"
+
         try:
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if not info:
                     return None
+                if "entries" in info and isinstance(info["entries"], list) and len(info["entries"]) > 0:
+                    info = info["entries"][0]
 
                 yt_title = info.get("title", "") or title
                 yt_artist = info.get("uploader", "") or info.get("artist", "") or artist

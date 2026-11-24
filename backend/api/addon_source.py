@@ -276,30 +276,20 @@ class AddonSourceResolver:
 
         base_url = endpoint.rstrip("/")
         cand_bases = [base_url]
-        if "/music" in base_url:
-            cand_bases.append(base_url.replace("/music", "/eclipse"))
-            cand_bases.append(base_url.replace("/music", ""))
-        elif "/eclipse" in base_url:
-            cand_bases.append(base_url.replace("/eclipse", "/music"))
-            cand_bases.append(base_url.replace("/eclipse", ""))
-        else:
-            cand_bases.append(f"{base_url}/eclipse")
-            cand_bases.append(f"{base_url}/music")
+        if "/manifest.json" in base_url:
+            cand_bases = [base_url.replace("/manifest.json", "").rstrip("/")]
 
         queries_to_try = [search_query]
-        if clean_title and clean_title not in queries_to_try:
+        if clean_title and clean_title != search_query:
             queries_to_try.append(clean_title)
-        raw_clean = re.sub(r'\(.*?\)|\[.*?\]', '', title).split('|')[0].strip()
-        if raw_clean and raw_clean not in queries_to_try:
-            queries_to_try.append(raw_clean)
 
         # 1. BitChord & Eclipse Addon Protocol (/search?q={query} -> /stream/{id})
         for cand_base in cand_bases:
-            cand_clean = cand_base.replace("/manifest.json", "").rstrip("/")
+            cand_clean = cand_base.rstrip("/")
             for q_text in queries_to_try:
                 try:
                     search_url = f"{cand_clean}/search?q={urllib.parse.quote(q_text)}"
-                    resp = requests.get(search_url, headers=req_headers, timeout=3.5)
+                    resp = requests.get(search_url, headers=req_headers, timeout=2.5)
                     if resp.status_code in (401, 403):
                         continue
                     if resp.status_code == 200 and "application/json" in resp.headers.get("Content-Type", "").lower():
@@ -307,14 +297,14 @@ class AddonSourceResolver:
                         raw_tracks = data.get("tracks") or data.get("results") or data.get("items") or []
                         if isinstance(raw_tracks, list) and len(raw_tracks) > 0:
                             candidates = self._rank_candidates(raw_tracks, clean_title, clean_artist, quality_preference, target_duration=duration)
-                            for candidate in candidates[:3]:
+                            for candidate in candidates[:2]:
                                 track_id = candidate.get("id") or candidate.get("trackId")
                                 if not track_id:
                                     continue
 
                                 s_url = f"{cand_clean}/stream/{urllib.parse.quote(str(track_id))}"
                                 try:
-                                    s_resp = requests.get(s_url, headers=req_headers, timeout=6.0, allow_redirects=True)
+                                    s_resp = requests.get(s_url, headers=req_headers, timeout=2.5, allow_redirects=True)
                                     if s_resp.status_code == 200:
                                         if "application/json" in s_resp.headers.get("Content-Type", "").lower():
                                             s_data = s_resp.json()
@@ -498,18 +488,20 @@ class AddonSourceResolver:
     def _probe_stream(self, media_url: str, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """
         Fast probe to verify the stream URL and extract bit-exact physical audio metadata.
-        Probes bytes 0-63 (FLAC STREAMINFO block, MP4 ftyp box, etc.).
+        Probes bytes 0-16383 (FLAC STREAMINFO block, MP4 ftyp box, etc.).
         """
         import struct
         try:
             probe_headers = dict(headers)
-            probe_headers["Range"] = "bytes=0-63"
-            probe = requests.get(media_url, headers=probe_headers, timeout=6.0, stream=True)
+            probe_headers["Range"] = "bytes=0-16383"
+            probe = requests.get(media_url, headers=probe_headers, timeout=2.5, stream=True)
             if probe.status_code not in (200, 206):
                 logger.debug(f"Stream probe returned non-200/206 status: {probe.status_code}")
                 return None
 
-            raw_bytes = probe.raw.read(64)
+            raw_bytes = probe.raw.read(16384)
+            if len(raw_bytes) < 64:
+                return None
             content_range = probe.headers.get("Content-Range", "")
             total_bytes = 0
             if "/" in content_range:

@@ -153,6 +153,7 @@ let sourceNode: MediaElementAudioSourceNode | null = null;
 let eqFilterNodes: BiquadFilterNode[] = [];
 let gainNode: GainNode | null = null;
 let currentTrackResolutionId = 0;
+let userExplicitlyPaused = false;
 let registeredVideoStopper: (() => void) | null = null;
 let registeredVideoNext: (() => void) | null = null;
 let registeredVideoPrevious: (() => void) | null = null;
@@ -341,14 +342,51 @@ function initAudioEngine(state: PlayerState) {
   });
 
   let waitingRecoveryTimer: any = null;
+  let stallRecoveryTimer: any = null;
+
   audioElement.addEventListener('waiting', () => {
     usePlayerStore.setState({ isLoading: true });
     if (waitingRecoveryTimer) clearTimeout(waitingRecoveryTimer);
     waitingRecoveryTimer = setTimeout(() => {
-      if (audioElement && audioElement.currentTime > 0 && !audioElement.paused) {
-        usePlayerStore.setState({ isLoading: false });
+      const { currentTrack, isVideoMode, activeVideoSource } = usePlayerStore.getState();
+      if (isVideoMode || activeVideoSource === 'youtube_video' || userExplicitlyPaused) return;
+
+      if (audioElement && !audioElement.ended) {
+        if (audioElement.paused) {
+          audioElement.play().catch(() => {});
+        }
+        // If after 4.5s still stuck at same position, recover via standard stream
+        setTimeout(() => {
+          if (!userExplicitlyPaused && currentTrack && audioElement && audioElement.paused && !audioElement.ended) {
+            console.warn('[Player] Auto-recovering from frozen buffer state...');
+            const cur = audioElement.currentTime || 0;
+            const vid = currentTrack.videoId || currentTrack.id;
+            audioElement.src = `${API_BASE}/api/stream/${encodeURIComponent(vid)}/audio?quality=standard&recovery=${Date.now()}`;
+            audioElement.currentTime = cur;
+            audioElement.play().catch(() => {});
+          }
+        }, 2000);
       }
     }, 2500);
+  });
+
+  audioElement.addEventListener('stalled', () => {
+    const { currentTrack, isVideoMode, activeVideoSource } = usePlayerStore.getState();
+    if (isVideoMode || activeVideoSource === 'youtube_video' || userExplicitlyPaused) return;
+
+    console.warn('[Player] Audio stream network stalled, arming recovery watchdog...');
+    usePlayerStore.setState({ isLoading: true });
+    if (stallRecoveryTimer) clearTimeout(stallRecoveryTimer);
+    stallRecoveryTimer = setTimeout(() => {
+      if (!userExplicitlyPaused && currentTrack && audioElement && !audioElement.ended) {
+        console.warn('[Player] Executing auto-recovery for stalled stream...');
+        const cur = audioElement.currentTime || 0;
+        const vid = currentTrack.videoId || currentTrack.id;
+        audioElement.src = `${API_BASE}/api/stream/${encodeURIComponent(vid)}/audio?quality=standard&recovery=${Date.now()}`;
+        audioElement.currentTime = cur;
+        audioElement.play().catch(() => {});
+      }
+    }, 3000);
   });
 
   audioElement.addEventListener('playing', () => {
@@ -362,18 +400,46 @@ function initAudioEngine(state: PlayerState) {
       }
       return;
     }
+    userExplicitlyPaused = false;
+    if (audioContext && audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
     usePlayerStore.setState({ isPlaying: true, isLoading: false });
   });
 
   audioElement.addEventListener('pause', () => {
-    const { isVideoMode, activeVideoSource } = usePlayerStore.getState();
+    const { isVideoMode, activeVideoSource, currentTrack } = usePlayerStore.getState();
     if (isVideoMode || activeVideoSource === 'youtube_video') return;
     if (audioElement && !isNaN(audioElement.currentTime)) {
       try {
         localStorage.setItem('ytz_persisted_current_time', String(Math.floor(audioElement.currentTime)));
       } catch {}
     }
-    usePlayerStore.setState({ isPlaying: false });
+
+    if (userExplicitlyPaused) {
+      usePlayerStore.setState({ isPlaying: false, isLoading: false });
+      return;
+    }
+
+    // Unintended browser pause caused by buffer underrun: auto-resume watchdog
+    if (currentTrack && audioElement && !audioElement.ended) {
+      console.warn('[Player] Buffer pause encountered without user intent. Watchdog auto-resuming...');
+      usePlayerStore.setState({ isLoading: true });
+      setTimeout(() => {
+        if (!userExplicitlyPaused && audioElement && audioElement.paused && !audioElement.ended) {
+          audioElement.play().catch(() => {
+            if (!audioElement) return;
+            const vid = currentTrack.videoId || currentTrack.id;
+            const cur = audioElement.currentTime || 0;
+            audioElement.src = `${API_BASE}/api/stream/${encodeURIComponent(vid)}/audio?quality=standard&recovery=${Date.now()}`;
+            audioElement.currentTime = cur;
+            audioElement.play().catch(() => {});
+          });
+        }
+      }, 300);
+    } else {
+      usePlayerStore.setState({ isPlaying: false, isLoading: false });
+    }
   });
 
   audioElement.addEventListener('error', (e) => {
@@ -383,10 +449,12 @@ function initAudioEngine(state: PlayerState) {
     // Resilient fallback: if error was caused by blob URL or high-bitrate stream decoding error, fall back to standard stream
     if (currentTrack && audioElement) {
       const vid = currentTrack.videoId || currentTrack.id;
-      const fallbackUrl = `${API_BASE}/api/stream/${encodeURIComponent(vid)}/audio?quality=standard`;
+      const cur = audioElement.currentTime || 0;
+      const fallbackUrl = `${API_BASE}/api/stream/${encodeURIComponent(vid)}/audio?quality=standard&recovery=${Date.now()}`;
       if (audioElement.src !== fallbackUrl) {
-        console.log('[Player] Recovering via standard stream fallback');
+        console.log('[Player] Recovering via standard stream fallback at', cur);
         audioElement.src = fallbackUrl;
+        audioElement.currentTime = cur;
         audioElement.play().catch(() => {});
       }
     }
@@ -817,6 +885,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   pause: () => {
+    userExplicitlyPaused = true;
     if (get().isVideoMode) {
       const iframes = document.querySelectorAll('iframe');
       iframes.forEach((iframe) => {
@@ -832,16 +901,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (audioElement && !audioElement.paused) {
       audioElement.pause();
     }
-    set({ isPlaying: false });
+    set({ isPlaying: false, isLoading: false });
   },
 
   pauseAudio: () => {
+    userExplicitlyPaused = true;
     if (audioElement && !audioElement.paused) {
       audioElement.pause();
     }
+    set({ isPlaying: false, isLoading: false });
   },
 
   stopAudio: () => {
+    userExplicitlyPaused = true;
     currentTrackResolutionId++;
     if (audioElement) {
       try {
@@ -851,10 +923,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         audioElement.load();
       } catch {}
     }
-    set({ isPlaying: false });
+    set({ isPlaying: false, isLoading: false });
   },
 
   play: () => {
+    userExplicitlyPaused = false;
     initAudioEngine(get());
     if (get().isVideoMode) {
       const iframes = document.querySelectorAll('iframe');
@@ -887,6 +960,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playTrack: async (track: Track, newQueue?: Track[], seekTime?: number) => {
+    userExplicitlyPaused = false;
     initAudioEngine(get());
     const resolutionId = ++currentTrackResolutionId;
 
@@ -1230,16 +1304,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
     }
     if (audioElement.paused) {
+      userExplicitlyPaused = false;
       set({ activeVideoSource: null });
       audioElement.play().catch(() => {});
       set({ isPlaying: true });
     } else {
+      userExplicitlyPaused = true;
       audioElement.pause();
-      set({ isPlaying: false });
+      set({ isPlaying: false, isLoading: false });
     }
   },
 
   next: async () => {
+    userExplicitlyPaused = false;
     const { activeVideoSource } = get();
     // If a persistent YouTube video is actively playing, advance the video queue
     if (activeVideoSource === 'youtube_video' && registeredVideoNext) {
@@ -1268,6 +1345,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   previous: async () => {
+    userExplicitlyPaused = false;
     const { activeVideoSource } = get();
     // If a persistent YouTube video is actively playing, rewind to previous video
     if (activeVideoSource === 'youtube_video' && registeredVideoPrevious) {
