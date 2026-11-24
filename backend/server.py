@@ -20,6 +20,50 @@ from pydantic import BaseModel
 import requests
 import uvicorn
 
+# ---------------------------------------------------------------------------
+# Windows ProactorEventLoop WinError 10054 Fix
+# On Windows, when an HTTP/WebSocket client resets or aborts a connection,
+# Python's _ProactorBasePipeTransport._call_connection_lost calls
+# self._sock.shutdown(socket.SHUT_RDWR) which raises WinError 10054.
+# Because this is uncaught in asyncio, it prevents the socket from closing,
+# causing an infinite callback loop logging thousands of errors and freezing the event loop.
+# ---------------------------------------------------------------------------
+if sys.platform == "win32":
+    import socket
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+
+        def _silence_proactor_connection_lost(self, exc):
+            if getattr(self, "_called_connection_lost", False):
+                return
+            try:
+                if hasattr(self, "_protocol") and self._protocol is not None:
+                    self._protocol.connection_lost(exc)
+            finally:
+                if hasattr(self, "_sock") and self._sock is not None:
+                    if hasattr(self._sock, "shutdown") and getattr(self._sock, "fileno", lambda: -1)() != -1:
+                        try:
+                            self._sock.shutdown(socket.SHUT_RDWR)
+                        except (ConnectionResetError, ConnectionAbortedError, OSError):
+                            pass
+                    try:
+                        self._sock.close()
+                    except (ConnectionResetError, ConnectionAbortedError, OSError):
+                        pass
+                    self._sock = None
+                server = getattr(self, "_server", None)
+                if server is not None:
+                    try:
+                        server._detach(self)
+                    except Exception:
+                        pass
+                    self._server = None
+                self._called_connection_lost = True
+
+        _ProactorBasePipeTransport._call_connection_lost = _silence_proactor_connection_lost
+    except Exception:
+        pass
+
 # Ensure project root is in sys.path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -107,9 +151,21 @@ class WSManager:
 ws_manager = WSManager()
 downloader_engine = DownloaderEngine(db_mgr, config_mgr, broadcast_fn=ws_manager.broadcast_sync, stream_resolver=stream_resolver)
 
+def _silence_loop_socket_errors(loop, context):
+    exc = context.get("exception")
+    if isinstance(exc, (ConnectionResetError, ConnectionAbortedError)):
+        return
+    msg = str(context.get("message", ""))
+    if "10054" in msg or "10053" in msg or "_call_connection_lost" in msg:
+        return
+    loop.default_exception_handler(context)
+
 @app.on_event("startup")
 async def startup_event():
-    ws_manager.loop = asyncio.get_running_loop()
+    running_loop = asyncio.get_running_loop()
+    ws_manager.loop = running_loop
+    if sys.platform == "win32":
+        running_loop.set_exception_handler(_silence_loop_socket_errors)
     logger.info("YT-Z Server started successfully on port 47892.")
 
 def get_lan_ip() -> str:
@@ -375,34 +431,12 @@ async def stream_audio_proxy(
                             pass
                     yield chunk
                 if await request.is_disconnected():
-                    # Client paused reading; finish downloading in background to complete cache
-                    if cache_f:
-                        def finish_cache_bg(f_handle, response_obj):
-                            try:
-                                for remaining in response_obj.iter_content(chunk_size=128 * 1024):
-                                    if remaining:
-                                        f_handle.write(remaining)
-                                f_handle.close()
-                                if bg_part.exists() and bg_part.stat().st_size > 32 * 1024:
-                                    meta = {
-                                        "videoId": video_id,
-                                        "title": title or stream_info.get("title", ""),
-                                        "artist": artist or stream_info.get("artist", ""),
-                                        "content_type": content_type,
-                                        "codec": stream_info.get("codec", "opus"),
-                                        "bitrate": stream_info.get("bitrate", 256),
-                                        "isLossless": stream_info.get("isLossless", False),
-                                        "source": stream_info.get("source", "cache"),
-                                    }
-                                    audio_cache.store_file(video_id, bg_part, meta)
-                            except Exception:
-                                try: f_handle.close()
-                                except Exception: pass
-                        threading.Thread(target=finish_cache_bg, args=(cache_f, resp), daemon=True).start()
-                        cache_f = None
                     break
             if cache_f:
-                cache_f.close()
+                try:
+                    cache_f.close()
+                except Exception:
+                    pass
                 cache_f = None
                 if bg_part.exists() and bg_part.stat().st_size > 32 * 1024:
                     meta = {
@@ -422,6 +456,7 @@ async def stream_audio_proxy(
             if cache_f:
                 try: cache_f.close()
                 except Exception: pass
+                cache_f = None
             try:
                 resp.close()
             except Exception:
@@ -545,9 +580,17 @@ def stream_video_proxy(video_id: str, request: Request):
             headers["Content-Length"] = resp.headers["Content-Length"]
 
         def chunk_generator():
-            for chunk in resp.iter_content(chunk_size=128 * 1024):
-                if chunk:
-                    yield chunk
+            try:
+                for chunk in resp.iter_content(chunk_size=128 * 1024):
+                    if chunk:
+                        yield chunk
+            except Exception as ex:
+                logger.debug(f"Video streaming chunk ended: {ex}")
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
 
         return StreamingResponse(
             chunk_generator(),

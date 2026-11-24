@@ -9,6 +9,50 @@ import webbrowser
 import logging
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# Windows ProactorEventLoop WinError 10054 Fix
+# On Windows, when an HTTP/WebSocket client resets or aborts a connection,
+# Python's _ProactorBasePipeTransport._call_connection_lost calls
+# self._sock.shutdown(socket.SHUT_RDWR) which raises WinError 10054.
+# Because this is uncaught in asyncio, it prevents the socket from closing,
+# causing an infinite callback loop logging thousands of errors and freezing the event loop.
+# ---------------------------------------------------------------------------
+if sys.platform == "win32":
+    import socket
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+
+        def _silence_proactor_connection_lost(self, exc):
+            if getattr(self, "_called_connection_lost", False):
+                return
+            try:
+                if hasattr(self, "_protocol") and self._protocol is not None:
+                    self._protocol.connection_lost(exc)
+            finally:
+                if hasattr(self, "_sock") and self._sock is not None:
+                    if hasattr(self._sock, "shutdown") and getattr(self._sock, "fileno", lambda: -1)() != -1:
+                        try:
+                            self._sock.shutdown(socket.SHUT_RDWR)
+                        except (ConnectionResetError, ConnectionAbortedError, OSError):
+                            pass
+                    try:
+                        self._sock.close()
+                    except (ConnectionResetError, ConnectionAbortedError, OSError):
+                        pass
+                    self._sock = None
+                server = getattr(self, "_server", None)
+                if server is not None:
+                    try:
+                        server._detach(self)
+                    except Exception:
+                        pass
+                    self._server = None
+                self._called_connection_lost = True
+
+        _ProactorBasePipeTransport._call_connection_lost = _silence_proactor_connection_lost
+    except Exception:
+        pass
+
 import requests
 
 ROOT_DIR = Path(__file__).resolve().parent
