@@ -82,6 +82,7 @@ class StreamResolver:
     ) -> Optional[Dict[str, Any]]:
         now = time.time()
         cache_key = f"{video_id}_{quality}"
+        is_valid_yt_id = len(video_id) == 11 and not any(c in video_id for c in " /\\?&=#")
 
         # 1. Check enabled Lossless Module Source Add-ons & Alternative Hi-Res Masters
         if self.addon_resolver and quality in ("lossless", "high", "auto") and title:
@@ -94,6 +95,7 @@ class StreamResolver:
             if addon_stream:
                 stream_url = addon_stream.get("streamUrl", "")
                 if stream_url.startswith("http://") or stream_url.startswith("https://"):
+                    addon_thumb = addon_stream.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if is_valid_yt_id else "")
                     result = {
                         "videoId": video_id,
                         "streamUrl": stream_url,
@@ -109,6 +111,7 @@ class StreamResolver:
                         "qualityTier": addon_stream.get("quality_tier", "high" if addon_stream.get("bitrate", 0) >= 320 else "standard"),
                         "source": addon_stream.get("source", "addon"),
                         "addonName": addon_stream.get("addon_name", "High Quality Stream (320k AAC)" if addon_stream.get("bitrate", 0) >= 320 else "External Stream"),
+                        "thumbnail": addon_thumb,
                     }
                     _STREAM_CACHE[cache_key] = {
                         "data": result,
@@ -149,6 +152,7 @@ class StreamResolver:
                     if addon_stream:
                         stream_url = addon_stream.get("streamUrl", "")
                         if stream_url.startswith("http://") or stream_url.startswith("https://"):
+                            addon_thumb = addon_stream.get("thumbnail") or info.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if is_valid_yt_id else "")
                             result = {
                                 "videoId": video_id,
                                 "streamUrl": stream_url,
@@ -164,6 +168,7 @@ class StreamResolver:
                                 "qualityTier": addon_stream.get("quality_tier", "high" if addon_stream.get("bitrate", 0) >= 320 else "standard"),
                                 "source": addon_stream.get("source", "addon"),
                                 "addonName": addon_stream.get("addon_name", "High Quality Stream (320k AAC)" if addon_stream.get("bitrate", 0) >= 320 else "External Stream"),
+                                "thumbnail": addon_thumb,
                             }
                             _STREAM_CACHE[cache_key] = {"data": result, "expires_at": now + CACHE_TTL}
                             return result
@@ -216,7 +221,7 @@ class StreamResolver:
                     "qualityTier": "high" if bitrate >= 160 else "standard",
                     "source": "youtube",
                     "addonName": f"YouTube Audio Direct ({bitrate}k {format_str})",
-                    "thumbnail": info.get("thumbnail", "")
+                    "thumbnail": info.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if is_valid_yt_id else "")
                 }
 
                 _STREAM_CACHE[cache_key] = {
@@ -248,7 +253,7 @@ class StreamResolver:
                             "isLossless": False,
                             "qualityTier": "high",
                             "source": "youtube_mobile",
-                            "thumbnail": alt_info.get("thumbnail", "")
+                            "thumbnail": alt_info.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if is_valid_yt_id else "")
                         }
                         _STREAM_CACHE[cache_key] = {"data": result, "expires_at": now + CACHE_TTL}
                         return result

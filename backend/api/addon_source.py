@@ -626,6 +626,7 @@ class AddonSourceResolver:
             display_name = "Audio Master Source"
 
         logger.info(f"Resolved stream from '{display_name}': {codec.upper()} {bitrate_kbps}kbps {sample_rate}Hz/{bit_depth}bit (lossless={is_lossless})")
+        thumb = data.get("thumbnail") or data.get("image") or data.get("cover") or data.get("poster") or ""
         return {
             "source": "addon",
             "addon_name": display_name,
@@ -640,5 +641,6 @@ class AddonSourceResolver:
             "title": data.get("title", default_title),
             "artist": data.get("artist", default_artist),
             "duration": (probed_meta.get("duration") if probed_meta else 0) or data.get("duration", 0),
+            "thumbnail": thumb,
             "is_internal": False
         }

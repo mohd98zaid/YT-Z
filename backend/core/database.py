@@ -279,7 +279,13 @@ class DatabaseManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM favorites ORDER BY added_at DESC")
-            return [dict(r) for r in cursor.fetchall()]
+            rows = [dict(r) for r in cursor.fetchall()]
+            for item in rows:
+                if not item.get("thumbnail"):
+                    v = item.get("videoId") or item.get("id")
+                    if v and len(str(v)) == 11 and not any(c in str(v) for c in " /\\?&=#"):
+                        item["thumbnail"] = f"https://i.ytimg.com/vi/{v}/hqdefault.jpg"
+            return rows
 
     def is_favorite(self, video_id: str) -> bool:
         with self._get_connection() as conn:
@@ -407,6 +413,9 @@ class DatabaseManager:
         artist = track.get("artist") or ""
         album = track.get("album") or ""
         thumbnail = track.get("thumbnail") or ""
+        vid = track.get("videoId") or t_id
+        if not thumbnail and vid and len(str(vid)) == 11 and not any(c in str(vid) for c in " /\\?&=#"):
+            thumbnail = f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
         duration = track.get("durationSeconds") or track.get("duration") or 0
         if isinstance(duration, str):
             try:
@@ -437,7 +446,13 @@ class DatabaseManager:
             SELECT track_id as id, video_id as videoId, title, artist, album, thumbnail, duration, played_at
             FROM playback_history ORDER BY played_at DESC LIMIT ?
             """, (limit,))
-            return [dict(r) for r in cursor.fetchall()]
+            rows = [dict(r) for r in cursor.fetchall()]
+            for item in rows:
+                if not item.get("thumbnail"):
+                    v = item.get("videoId") or item.get("id")
+                    if v and len(str(v)) == 11 and not any(c in str(v) for c in " /\\?&=#"):
+                        item["thumbnail"] = f"https://i.ytimg.com/vi/{v}/hqdefault.jpg"
+            return rows
 
     def delete_playback_history(self, track_id: str) -> None:
         with self._get_connection() as conn:
