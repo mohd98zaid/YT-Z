@@ -291,19 +291,13 @@ async def stream_audio_proxy(
         remote_headers["Range"] = range_header
 
     resp = None
-    first_chunk = None
     try:
-        # Fast 2.5s timeout for initial addon connection so failing third-party hosts failover immediately
+        # Fast 3.0s timeout for initial connection so failing third-party hosts failover immediately
         is_addon = stream_info.get("source") == "addon" or "pencari" in stream_url.lower()
-        addon_timeout = 2.5 if is_addon else 8.0
+        addon_timeout = 3.0 if is_addon else 8.0
         resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=addon_timeout)
         if resp.status_code not in (200, 206):
             raise ValueError(f"Upstream returned non-200/206 status: {resp.status_code}")
-        if is_addon:
-            # Test-read first chunk to guarantee stream is alive and delivers audio packets
-            first_chunk = next(resp.iter_content(chunk_size=64 * 1024), None)
-            if not first_chunk:
-                raise ValueError("Addon upstream delivered empty audio stream")
     except Exception as primary_err:
         logger.warning(f"Primary audio stream connection failed for {video_id} ({primary_err}). Falling back immediately to YouTube Native Opus...")
         try:
@@ -324,7 +318,6 @@ async def stream_audio_proxy(
             resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=8.0)
             if resp.status_code not in (200, 206):
                 raise HTTPException(status_code=502, detail=f"Fallback upstream failed: {resp.status_code}")
-            first_chunk = next(resp.iter_content(chunk_size=64 * 1024), None)
         except Exception as fallback_err:
             logger.error(f"Fallback stream connection also failed for {video_id}: {fallback_err}")
             raise HTTPException(status_code=502, detail="Audio stream unavailable.")
@@ -356,57 +349,79 @@ async def stream_audio_proxy(
     }
     if "Content-Range" in resp.headers:
         headers["Content-Range"] = resp.headers["Content-Range"]
-    if "Content-Length" in resp.headers and resp.status_code == 206:
-        headers["Content-Length"] = resp.headers["Content-Length"]
+    # DO NOT set Content-Length on StreamingResponse: avoids Uvicorn "Response content longer than Content-Length" errors
 
-    # Background Caching: Ensure current playing song is completely saved on disk
-    # so future scrub/range requests are served in 0ms without internet latency
-    if not audio_cache.is_cached(video_id):
-        def ensure_cached_bg():
-            try:
-                safe_id = "".join(c for c in video_id if c.isalnum() or c in ("-", "_"))
-                bg_part = audio_cache.cache_dir / f"{safe_id}.cache.part"
-                if bg_part.exists() and (time.time() - bg_part.stat().st_mtime < 15):
-                    return
-                bg_headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                }
-                with requests.get(stream_url, headers=bg_headers, stream=True, timeout=25.0) as r:
-                    if r.status_code in (200, 206):
-                        with open(bg_part, "wb") as f:
-                            for c in r.iter_content(chunk_size=128 * 1024):
-                                if c:
-                                    f.write(c)
-                        if bg_part.exists() and bg_part.stat().st_size > 32 * 1024:
-                            meta = {
-                                "videoId": video_id,
-                                "title": title or stream_info.get("title", ""),
-                                "artist": artist or stream_info.get("artist", ""),
-                                "content_type": content_type,
-                                "codec": stream_info.get("codec", "opus"),
-                                "bitrate": stream_info.get("bitrate", 256),
-                                "isLossless": stream_info.get("isLossless", False),
-                                "source": stream_info.get("source", "cache"),
-                            }
-                            audio_cache.store_file(video_id, bg_part, meta)
-            except Exception as ex:
-                logger.debug(f"Background cache download failed for {video_id}: {ex}")
-
-        threading.Thread(target=ensure_cached_bg, daemon=True).start()
+    # In-stream single-connection caching from byte 0 to eliminate duplicate upstream requests
+    is_initial_stream = not range_header or range_header.startswith("bytes=0-")
+    safe_id = "".join(c for c in video_id if c.isalnum() or c in ("-", "_"))
+    bg_part = audio_cache.cache_dir / f"{safe_id}.cache.part"
+    cache_f = None
+    if is_initial_stream and not audio_cache.is_cached(video_id):
+        try:
+            cache_f = open(bg_part, "wb")
+        except Exception:
+            cache_f = None
 
     # Optimized 64KB chunk stream with graceful client disconnect handling
     async def chunk_generator():
+        nonlocal cache_f
         try:
-            if first_chunk:
-                yield first_chunk
             for chunk in resp.iter_content(chunk_size=64 * 1024):
-                if await request.is_disconnected():
-                    break
                 if chunk:
+                    if cache_f:
+                        try:
+                            cache_f.write(chunk)
+                        except Exception:
+                            pass
                     yield chunk
+                if await request.is_disconnected():
+                    # Client paused reading; finish downloading in background to complete cache
+                    if cache_f:
+                        def finish_cache_bg(f_handle, response_obj):
+                            try:
+                                for remaining in response_obj.iter_content(chunk_size=128 * 1024):
+                                    if remaining:
+                                        f_handle.write(remaining)
+                                f_handle.close()
+                                if bg_part.exists() and bg_part.stat().st_size > 32 * 1024:
+                                    meta = {
+                                        "videoId": video_id,
+                                        "title": title or stream_info.get("title", ""),
+                                        "artist": artist or stream_info.get("artist", ""),
+                                        "content_type": content_type,
+                                        "codec": stream_info.get("codec", "opus"),
+                                        "bitrate": stream_info.get("bitrate", 256),
+                                        "isLossless": stream_info.get("isLossless", False),
+                                        "source": stream_info.get("source", "cache"),
+                                    }
+                                    audio_cache.store_file(video_id, bg_part, meta)
+                            except Exception:
+                                try: f_handle.close()
+                                except Exception: pass
+                        threading.Thread(target=finish_cache_bg, args=(cache_f, resp), daemon=True).start()
+                        cache_f = None
+                    break
+            if cache_f:
+                cache_f.close()
+                cache_f = None
+                if bg_part.exists() and bg_part.stat().st_size > 32 * 1024:
+                    meta = {
+                        "videoId": video_id,
+                        "title": title or stream_info.get("title", ""),
+                        "artist": artist or stream_info.get("artist", ""),
+                        "content_type": content_type,
+                        "codec": stream_info.get("codec", "opus"),
+                        "bitrate": stream_info.get("bitrate", 256),
+                        "isLossless": stream_info.get("isLossless", False),
+                        "source": stream_info.get("source", "cache"),
+                    }
+                    audio_cache.store_file(video_id, bg_part, meta)
         except Exception as ex:
             logger.debug(f"Streaming chunk error for {video_id}: {ex}")
         finally:
+            if cache_f:
+                try: cache_f.close()
+                except Exception: pass
             try:
                 resp.close()
             except Exception:
