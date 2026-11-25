@@ -7,6 +7,7 @@ import sqlite3
 import json
 import time
 import logging
+import uuid
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -606,3 +607,194 @@ class DatabaseManager:
             WHERE id = ? AND (is_custom_thumbnail = 0 OR is_custom_thumbnail IS NULL)
             """, (new_thumb, playlist_id))
             conn.commit()
+
+    def duplicate_custom_playlist(self, playlist_id: str, new_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name, description, thumbnail, is_custom_thumbnail FROM custom_playlists WHERE id = ?", (playlist_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            orig_name, desc, thumb, is_custom = row
+            target_name = new_name.strip() if new_name and new_name.strip() else f"{orig_name} (Copy)"
+            new_id = str(uuid.uuid4())
+            now = datetime.utcnow().isoformat()
+            cursor.execute("""
+            INSERT INTO custom_playlists (id, name, description, thumbnail, is_custom_thumbnail, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """, (new_id, target_name, desc or "", thumb or "", is_custom or 0, now))
+
+            cursor.execute("""
+            INSERT INTO custom_playlist_tracks (playlist_id, track_id, video_id, title, artist, album, thumbnail, duration, duration_seconds)
+            SELECT ?, track_id, video_id, title, artist, album, thumbnail, duration, duration_seconds
+            FROM custom_playlist_tracks
+            WHERE playlist_id = ?
+            ORDER BY id ASC
+            """, (new_id, playlist_id))
+            conn.commit()
+
+            cursor.execute("SELECT COUNT(*) FROM custom_playlist_tracks WHERE playlist_id = ?", (new_id,))
+            count = cursor.fetchone()[0]
+            return {
+                "id": new_id,
+                "name": target_name,
+                "description": desc,
+                "thumbnail": thumb,
+                "trackCount": count,
+                "created_at": now
+            }
+
+    def deduplicate_custom_playlist(self, playlist_id: str) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT id, track_id, title, artist
+            FROM custom_playlist_tracks
+            WHERE playlist_id = ?
+            ORDER BY id ASC
+            """, (playlist_id,))
+            rows = cursor.fetchall()
+            seen_ids = set()
+            seen_pairs = set()
+            to_delete = []
+
+            for r in rows:
+                row_id = r[0]
+                t_id = (r[1] or "").strip()
+                t_title = (r[2] or "").strip().lower()
+                t_artist = (r[3] or "").strip().lower()
+                pair = (t_title, t_artist)
+
+                if (t_id and t_id in seen_ids) or (t_title and pair in seen_pairs):
+                    to_delete.append(row_id)
+                else:
+                    if t_id:
+                        seen_ids.add(t_id)
+                    if t_title:
+                        seen_pairs.add(pair)
+
+            if to_delete:
+                placeholders = ",".join("?" for _ in to_delete)
+                cursor.execute(f"DELETE FROM custom_playlist_tracks WHERE id IN ({placeholders})", to_delete)
+                conn.commit()
+
+            cursor.execute("SELECT COUNT(*) FROM custom_playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+            remaining = cursor.fetchone()[0]
+            return {
+                "playlist_id": playlist_id,
+                "removedCount": len(to_delete),
+                "remainingCount": remaining
+            }
+
+    def merge_custom_playlists(
+        self,
+        source_ids: List[str],
+        target_id: Optional[str] = None,
+        new_name: Optional[str] = None,
+        new_desc: str = "",
+        deduplicate: bool = True,
+        delete_sources: bool = False
+    ) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            final_target_id = target_id
+            now = datetime.utcnow().isoformat()
+
+            # If target_id not provided, create a new playlist
+            if not final_target_id:
+                final_target_id = str(uuid.uuid4())
+                target_name = new_name.strip() if new_name and new_name.strip() else "Merged Playlist"
+                cursor.execute("""
+                INSERT INTO custom_playlists (id, name, description, thumbnail, is_custom_thumbnail, created_at)
+                VALUES (?, ?, ?, '', 0, ?)
+                """, (final_target_id, target_name, new_desc or "Merged from multiple collections", now))
+
+            # Fetch existing tracks in target if deduplication is enabled
+            existing_track_ids = set()
+            existing_pairs = set()
+            if deduplicate:
+                cursor.execute("SELECT track_id, title, artist FROM custom_playlist_tracks WHERE playlist_id = ?", (final_target_id,))
+                for row in cursor.fetchall():
+                    if row[0]:
+                        existing_track_ids.add(row[0])
+                    t_title = (row[1] or "").strip().lower()
+                    t_artist = (row[2] or "").strip().lower()
+                    if t_title:
+                        existing_pairs.add((t_title, t_artist))
+
+            # Gather tracks from all source playlists in order
+            added_count = 0
+            first_thumbnail = ""
+
+            for s_id in source_ids:
+                if s_id == final_target_id:
+                    continue  # Don't merge into itself
+                cursor.execute("""
+                SELECT track_id, video_id, title, artist, album, thumbnail, duration, duration_seconds
+                FROM custom_playlist_tracks
+                WHERE playlist_id = ?
+                ORDER BY id ASC
+                """, (s_id,))
+                tracks = cursor.fetchall()
+
+                for t in tracks:
+                    t_id = t[0]
+                    v_id = t[1]
+                    title = t[2] or "Track"
+                    artist = t[3] or ""
+                    album = t[4] or ""
+                    thumb = t[5] or ""
+                    duration = t[6] or "0:00"
+                    duration_sec = t[7] or 0
+
+                    t_title_lower = title.strip().lower()
+                    t_artist_lower = artist.strip().lower()
+                    pair = (t_title_lower, t_artist_lower)
+
+                    if deduplicate:
+                        if (t_id and t_id in existing_track_ids) or (t_title_lower and pair in existing_pairs):
+                            continue
+
+                    cursor.execute("""
+                    INSERT INTO custom_playlist_tracks (playlist_id, track_id, video_id, title, artist, album, thumbnail, duration, duration_seconds)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (final_target_id, t_id, v_id, title, artist, album, thumb, duration, duration_sec))
+
+                    if not first_thumbnail and thumb:
+                        first_thumbnail = thumb
+
+                    if t_id:
+                        existing_track_ids.add(t_id)
+                    if t_title_lower:
+                        existing_pairs.add(pair)
+                    added_count += 1
+
+            # Update target thumbnail if empty
+            if first_thumbnail:
+                cursor.execute("""
+                UPDATE custom_playlists SET thumbnail = ?
+                WHERE id = ? AND (thumbnail IS NULL OR thumbnail = '' OR is_custom_thumbnail = 0)
+                """, (first_thumbnail, final_target_id))
+
+            # Delete source playlists if requested (excluding target)
+            if delete_sources:
+                for s_id in source_ids:
+                    if s_id != final_target_id:
+                        cursor.execute("DELETE FROM custom_playlist_tracks WHERE playlist_id = ?", (s_id,))
+                        cursor.execute("DELETE FROM custom_playlists WHERE id = ?", (s_id,))
+
+            conn.commit()
+
+            cursor.execute("SELECT COUNT(*) FROM custom_playlist_tracks WHERE playlist_id = ?", (final_target_id,))
+            total_count = cursor.fetchone()[0]
+            cursor.execute("SELECT id, name, description, thumbnail FROM custom_playlists WHERE id = ?", (final_target_id,))
+            p_row = cursor.fetchone()
+
+            return {
+                "id": final_target_id,
+                "name": p_row[1] if p_row else "Merged Playlist",
+                "description": p_row[2] if p_row else "",
+                "thumbnail": p_row[3] if p_row else first_thumbnail,
+                "addedCount": added_count,
+                "totalCount": total_count
+            }

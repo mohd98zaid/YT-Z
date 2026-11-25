@@ -871,6 +871,39 @@ def remove_track_from_custom_playlist(playlist_id: str, track_id: str):
     db_mgr.remove_track_from_playlist(playlist_id, track_id)
     return {"status": "ok"}
 
+@app.post("/api/playlists/custom/merge")
+def merge_custom_playlists(payload: Dict[str, Any] = Body(...)):
+    source_ids = payload.get("sourcePlaylistIds", [])
+    if not source_ids or len(source_ids) < 2 and not payload.get("targetPlaylistId"):
+        raise HTTPException(status_code=400, detail="At least 2 playlists or 1 source and 1 target required to merge")
+    target_id = payload.get("targetPlaylistId")
+    new_name = payload.get("newPlaylistName")
+    new_desc = payload.get("newPlaylistDescription", "")
+    deduplicate = payload.get("deduplicate", True)
+    delete_sources = payload.get("deleteSources", False)
+    result = db_mgr.merge_custom_playlists(
+        source_ids=source_ids,
+        target_id=target_id,
+        new_name=new_name,
+        new_desc=new_desc,
+        deduplicate=deduplicate,
+        delete_sources=delete_sources
+    )
+    return result
+
+@app.post("/api/playlists/custom/{playlist_id}/duplicate")
+def duplicate_custom_playlist(playlist_id: str, payload: Dict[str, Any] = Body(default={})):
+    name = payload.get("name") if isinstance(payload, dict) else None
+    result = db_mgr.duplicate_custom_playlist(playlist_id, new_name=name)
+    if not result:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    return result
+
+@app.post("/api/playlists/custom/{playlist_id}/deduplicate")
+def deduplicate_custom_playlist(playlist_id: str):
+    result = db_mgr.deduplicate_custom_playlist(playlist_id)
+    return result
+
 # ==================== Built-in ID3 Tag Editor & Storage ====================
 
 @app.post("/api/library/edit-tags")
