@@ -330,9 +330,13 @@ class StreamResolver:
                 ]
                 
                 if combined:
-                    best_video = sorted(combined, key=lambda x: x.get("height") or 0, reverse=True)[0]
+                    best_video = sorted(combined, key=lambda x: (x.get("height") or 0, x.get("tbr") or 0), reverse=True)[0]
                 else:
-                    best_video = {"url": info.get("url"), "height": 360, "ext": "mp4"}
+                    direct_fmts = [f for f in formats if f.get("url") and f.get("vcodec") != "none"]
+                    if direct_fmts:
+                        best_video = sorted(direct_fmts, key=lambda x: (x.get("height") or 0), reverse=True)[0]
+                    else:
+                        best_video = {"url": info.get("url"), "height": 360, "ext": "mp4"}
 
                 stream_url = best_video.get("url")
                 if not stream_url:
