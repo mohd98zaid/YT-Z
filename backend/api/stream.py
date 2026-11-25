@@ -95,7 +95,7 @@ class StreamResolver:
             if addon_stream:
                 stream_url = addon_stream.get("streamUrl", "")
                 if stream_url.startswith("http://") or stream_url.startswith("https://"):
-                    addon_thumb = addon_stream.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if is_valid_yt_id else "")
+                    addon_thumb = addon_stream.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if is_valid_yt_id else "")
                     result = {
                         "videoId": video_id,
                         "streamUrl": stream_url,
@@ -152,7 +152,7 @@ class StreamResolver:
                     if addon_stream:
                         stream_url = addon_stream.get("streamUrl", "")
                         if stream_url.startswith("http://") or stream_url.startswith("https://"):
-                            addon_thumb = addon_stream.get("thumbnail") or info.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if is_valid_yt_id else "")
+                            addon_thumb = addon_stream.get("thumbnail") or info.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if is_valid_yt_id else "")
                             result = {
                                 "videoId": video_id,
                                 "streamUrl": stream_url,
@@ -221,7 +221,7 @@ class StreamResolver:
                     "qualityTier": "high" if bitrate >= 160 else "standard",
                     "source": "youtube",
                     "addonName": f"YouTube Audio Direct ({bitrate}k {format_str})",
-                    "thumbnail": info.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if is_valid_yt_id else "")
+                    "thumbnail": info.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if is_valid_yt_id else "")
                 }
 
                 _STREAM_CACHE[cache_key] = {

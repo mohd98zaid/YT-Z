@@ -217,6 +217,20 @@ class AddonSourceResolver:
                                         raw_name = s.get("name", cand_title)
                                         import html
                                         clean_name = html.unescape(raw_name)
+
+                                        # Extract best high-res artwork from JioSaavn item
+                                        thumb_url = ""
+                                        raw_imgs = s.get("image") or s.get("thumbnails") or s.get("thumbnail")
+                                        if isinstance(raw_imgs, list) and len(raw_imgs) > 0:
+                                            last_img = raw_imgs[-1]
+                                            if isinstance(last_img, dict):
+                                                thumb_url = last_img.get("url") or last_img.get("link") or ""
+                                            elif isinstance(last_img, str):
+                                                thumb_url = last_img
+                                        elif isinstance(raw_imgs, str):
+                                            thumb_url = raw_imgs
+                                        if thumb_url:
+                                            thumb_url = thumb_url.replace("150x150", "500x500").replace("50x50", "500x500")
                                         
                                         if is_genuine_lossless:
                                             addon_label = f"Lossless Master ({codec.upper()})"
@@ -242,6 +256,7 @@ class AddonSourceResolver:
                                             "streamUrl": stream_url,
                                             "title": clean_name,
                                             "artist": s.get("primaryArtists", artist),
+                                            "thumbnail": thumb_url,
                                             "is_internal": False
                                         }
                 except Exception as ex:

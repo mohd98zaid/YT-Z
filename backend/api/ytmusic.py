@@ -99,6 +99,8 @@ class YTMusicService:
                 duration_seconds = 0
 
         thumbnail = self._normalize_thumbnail(item.get("thumbnails"))
+        if not thumbnail and video_id and len(video_id) == 11 and not any(c in video_id for c in " /\\?&=#"):
+            thumbnail = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
 
         return {
             "id": video_id,
