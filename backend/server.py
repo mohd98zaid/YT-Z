@@ -220,6 +220,24 @@ async def update_session(payload: Dict[str, Any] = Body(...)):
     updated = config_mgr.update(payload)
     return {"status": "ok", "session": updated}
 
+# ==================== Taskbar Playback Controls ====================
+
+class TaskbarStateRequest(BaseModel):
+    isPlaying: bool
+    title: str = ""
+    artist: str = ""
+
+@app.post("/api/player/taskbar-state")
+async def update_taskbar_state(req: TaskbarStateRequest):
+    try:
+        from backend.core.taskbar import get_taskbar_manager
+        mgr = get_taskbar_manager()
+        if mgr:
+            mgr.update_playback(req.isPlaying, req.title, req.artist)
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # ==================== YouTube Music Discovery ====================
 
 @app.get("/api/ytm/home")

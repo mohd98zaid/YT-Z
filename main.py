@@ -151,6 +151,16 @@ def patch_edgechromium_fullscreen():
             except Exception as ex:
                 logger.debug(f"Could not register WebResourceRequested filter: {ex}")
 
+            # Hook Windows Taskbar thumbnail toolbar controls (Previous / Play-Pause / Next)
+            try:
+                from backend.core.taskbar import get_taskbar_manager
+                tb_mgr = get_taskbar_manager()
+                if tb_mgr and hasattr(self, "form") and self.form:
+                    tb_mgr.attach(self.form, self.pywebview_window)
+                    logger.info("Successfully attached TaskbarManager to desktop window")
+            except Exception as ex:
+                logger.debug(f"Taskbar hook note: {ex}")
+
         ec.EdgeChrome.on_webview_ready = hooked_on_webview_ready
     except Exception as e:
         logger.debug(f"EdgeChromium patch note: {e}")
