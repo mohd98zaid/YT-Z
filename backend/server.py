@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import requests
+import httpx
 import uvicorn
 
 # ---------------------------------------------------------------------------
@@ -87,6 +88,16 @@ logging.basicConfig(
     format="%(asctime)s - [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("YTZ.Server")
+
+_HTTPX_CLIENT: Optional[httpx.AsyncClient] = None
+
+def get_httpx_client() -> httpx.AsyncClient:
+    global _HTTPX_CLIENT
+    if _HTTPX_CLIENT is None or _HTTPX_CLIENT.is_closed:
+        limits = httpx.Limits(max_keepalive_connections=50, max_connections=100, keepalive_expiry=60.0)
+        timeout = httpx.Timeout(connect=6.0, read=12.0, write=10.0, pool=10.0)
+        _HTTPX_CLIENT = httpx.AsyncClient(limits=limits, timeout=timeout, follow_redirects=True)
+    return _HTTPX_CLIENT
 
 app = FastAPI(title="YT-Z Desktop Core Engine", version="1.0.0")
 
@@ -364,15 +375,28 @@ async def stream_audio_proxy(
     if range_header:
         remote_headers["Range"] = range_header
 
+    client = get_httpx_client()
     resp = None
+    stream_cm = None
     try:
-        # Fast 3.0s timeout for initial connection so failing third-party hosts failover immediately
+        # Fast 3.5s timeout for initial connection so failing third-party hosts failover immediately
         is_addon = stream_info.get("source") == "addon" or "pencari" in stream_url.lower()
-        addon_timeout = 3.0 if is_addon else 8.0
-        resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=addon_timeout)
+        addon_timeout = 3.5 if is_addon else 8.0
+        stream_cm = client.stream(
+            "GET",
+            stream_url,
+            headers=remote_headers,
+            timeout=httpx.Timeout(connect=addon_timeout, read=8.0, write=8.0, pool=10.0)
+        )
+        resp = await stream_cm.__aenter__()
         if resp.status_code not in (200, 206):
             raise ValueError(f"Upstream returned non-200/206 status: {resp.status_code}")
     except Exception as primary_err:
+        if stream_cm:
+            try: await stream_cm.__aexit__(None, None, None)
+            except Exception: pass
+            stream_cm = None
+            resp = None
         logger.warning(f"Primary audio stream connection failed for {video_id} ({primary_err}). Falling back immediately to YouTube Native Opus...")
         try:
             from backend.api.stream import _STREAM_CACHE
@@ -389,10 +413,19 @@ async def stream_audio_proxy(
             raise HTTPException(status_code=502, detail="Failed to resolve playable audio.")
         stream_url = stream_info["streamUrl"]
         try:
-            resp = requests.get(stream_url, headers=remote_headers, stream=True, timeout=8.0)
+            stream_cm = client.stream(
+                "GET",
+                stream_url,
+                headers=remote_headers,
+                timeout=httpx.Timeout(connect=8.0, read=10.0, write=10.0, pool=10.0)
+            )
+            resp = await stream_cm.__aenter__()
             if resp.status_code not in (200, 206):
                 raise HTTPException(status_code=502, detail=f"Fallback upstream failed: {resp.status_code}")
         except Exception as fallback_err:
+            if stream_cm:
+                try: await stream_cm.__aexit__(None, None, None)
+                except Exception: pass
             logger.error(f"Fallback stream connection also failed for {video_id}: {fallback_err}")
             raise HTTPException(status_code=502, detail="Audio stream unavailable.")
 
@@ -436,11 +469,11 @@ async def stream_audio_proxy(
         except Exception:
             cache_f = None
 
-    # Optimized 64KB chunk stream with graceful client disconnect handling
+    # Optimized non-blocking async chunk stream with graceful client disconnect handling
     async def chunk_generator():
         nonlocal cache_f
         try:
-            for chunk in resp.iter_content(chunk_size=64 * 1024):
+            async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
                 if chunk:
                     if cache_f:
                         try:
@@ -468,6 +501,15 @@ async def stream_audio_proxy(
                         "source": stream_info.get("source", "cache"),
                     }
                     audio_cache.store_file(video_id, bg_part, meta)
+        except (httpx.ReadTimeout, httpx.NetworkError, httpx.RemoteProtocolError, ConnectionError) as net_err:
+            logger.warning(f"Audio upstream connection interrupted for {video_id}: {net_err}")
+            try:
+                from backend.api.stream import _STREAM_CACHE
+                _STREAM_CACHE.pop(f"{video_id}_{quality}", None)
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            pass
         except Exception as ex:
             logger.debug(f"Streaming chunk error for {video_id}: {ex}")
         finally:
@@ -475,10 +517,11 @@ async def stream_audio_proxy(
                 try: cache_f.close()
                 except Exception: pass
                 cache_f = None
-            try:
-                resp.close()
-            except Exception:
-                pass
+            if stream_cm:
+                try:
+                    await stream_cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
 
     return StreamingResponse(
         chunk_generator(),
