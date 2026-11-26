@@ -253,7 +253,7 @@ class StreamResolver:
                             "isLossless": False,
                             "qualityTier": "high",
                             "source": "youtube_mobile",
-                            "thumbnail": alt_info.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if is_valid_yt_id else "")
+                            "thumbnail": alt_info.get("thumbnail") or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if is_valid_yt_id else "")
                         }
                         _STREAM_CACHE[cache_key] = {"data": result, "expires_at": now + CACHE_TTL}
                         return result

@@ -24,6 +24,22 @@ class AudioCacheManager:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._active_downloads: Dict[str, threading.Event] = {}
+        # Clean up orphaned .part temp files left by interrupted runs
+        try:
+            for part_f in self.cache_dir.glob("*.part"):
+                part_f.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    def invalidate(self, video_id: str) -> None:
+        """Delete any cached audio and metadata for a track (e.g. on stream recovery)."""
+        audio_file, meta_file, _ = self.get_file_paths(video_id)
+        try:
+            with self._lock:
+                audio_file.unlink(missing_ok=True)
+                meta_file.unlink(missing_ok=True)
+        except Exception as e:
+            logger.debug(f"Cache invalidation note for {video_id}: {e}")
 
     def get_file_paths(self, video_id: str) -> Tuple[Path, Path, Path]:
         safe_id = "".join(c for c in video_id if c.isalnum() or c in ("-", "_"))

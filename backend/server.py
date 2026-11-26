@@ -6,6 +6,7 @@ Multi-provider Lyrics Engine, Spotify Importer, and Local Media Server.
 """
 import sys
 import os
+import uuid
 import asyncio
 import threading
 import logging
@@ -15,7 +16,7 @@ from typing import Dict, Any, List, Optional, Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from pydantic import BaseModel
 import requests
 import httpx
@@ -249,6 +250,22 @@ async def update_taskbar_state(req: TaskbarStateRequest):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.get("/api/proxy/thumbnail")
+async def proxy_thumbnail(url: str = Query(...)):
+    """Proxy external thumbnail image for MediaSession / Electron contexts where external URLs are blocked."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code == 200:
+                return Response(
+                    content=resp.content,
+                    media_type=resp.headers.get("content-type", "image/jpeg"),
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+        return Response(status_code=404)
+    except Exception:
+        return Response(status_code=502)
+
 # ==================== YouTube Music Discovery ====================
 
 @app.get("/api/ytm/home")
@@ -335,21 +352,47 @@ async def stream_audio_proxy(
     request: Request,
     title: Optional[str] = Query(""),
     artist: Optional[str] = Query(""),
-    quality: Optional[str] = Query("auto")
+    quality: Optional[str] = Query("auto"),
+    recovery: Optional[str] = Query(None),
+    resume: Optional[str] = Query(None)
 ):
     """
     High-Performance Audio streaming proxy with:
     1. 0ms Local Disk Audio Cache with HTTP 206 Partial Content Range support.
-    2. Resilient failover: If external/addon source times out or fails, falls back immediately
-       to YouTube native Opus without throwing 502 Bad Gateway.
-    3. Simultaneous background cache recording so subsequent playback is 100% local.
+    2. First-chunk verification before sending response headers: dead/stalled addon streams
+       fail over immediately to YouTube native Opus before the browser sees anything.
+    3. Transparent mid-stream byte-range reconnect so upstream drops never stall playback.
+    4. Strict cache integrity: only complete, full-length streams are ever promoted to cache.
     """
     range_header = request.headers.get("Range")
+    is_recovery = bool(recovery or resume)
 
-    # 1. Check local audio cache on disk first (0ms instant response)
-    cached_resp = audio_cache.serve_cached(video_id, range_header=range_header)
-    if cached_resp is not None:
-        return cached_resp
+    # If the client triggered failover recovery/resume, invalidate any broken cached file
+    # and clear the resolved URL cache so we get a clean native YouTube stream.
+    if is_recovery:
+        audio_cache.invalidate(video_id)
+        try:
+            from backend.api.stream import _STREAM_CACHE
+            for qk in ("lossless", "high", "auto", "standard", quality):
+                _STREAM_CACHE.pop(f"{video_id}_{qk}", None)
+        except Exception:
+            pass
+        quality = "standard"
+    else:
+        # 1. Check local audio cache on disk first (0ms instant response)
+        cached_resp = audio_cache.serve_cached(video_id, range_header=range_header)
+        if cached_resp is not None:
+            return cached_resp
+
+    # Parse byte offset if Range header is present
+    base_offset = 0
+    if range_header and "bytes=" in range_header:
+        try:
+            start_str = range_header.replace("bytes=", "").split("-")[0].strip()
+            if start_str:
+                base_offset = max(0, int(start_str))
+        except Exception:
+            base_offset = 0
 
     # 2. Resolve audio stream metadata
     loop = asyncio.get_event_loop()
@@ -364,7 +407,7 @@ async def stream_audio_proxy(
     )
     if not stream_info:
         raise HTTPException(status_code=404, detail="Could not resolve audio stream for track.")
-    
+
     stream_url = stream_info.get("streamUrl")
     if not stream_url:
         raise HTTPException(status_code=404, detail="No stream URL available.")
@@ -376,31 +419,55 @@ async def stream_audio_proxy(
         remote_headers["Range"] = range_header
 
     client = get_httpx_client()
+
+    async def _open_and_read_first_chunk(target_url: str, req_headers: Dict[str, str], connect_t: float, read_t: float):
+        cm = client.stream(
+            "GET",
+            target_url,
+            headers=req_headers,
+            timeout=httpx.Timeout(connect=connect_t, read=read_t, write=8.0, pool=10.0)
+        )
+        r = await cm.__aenter__()
+        if r.status_code not in (200, 206):
+            await cm.__aexit__(None, None, None)
+            raise ValueError(f"Upstream returned non-200/206 status: {r.status_code}")
+        it = r.aiter_bytes(chunk_size=64 * 1024)
+        first = b""
+        try:
+            async for ch in it:
+                if ch:
+                    first = ch
+                    break
+        except Exception:
+            await cm.__aexit__(None, None, None)
+            raise
+        if not first:
+            await cm.__aexit__(None, None, None)
+            raise ValueError("Upstream returned empty stream body")
+        return cm, r, it, first
+
     resp = None
     stream_cm = None
+    chunk_iter = None
+    first_chunk = b""
     try:
-        # Fast 3.5s timeout for initial connection so failing third-party hosts failover immediately
+        # Fast 3.5s connect / 4.5s first-chunk timeout for third-party addon hosts
         is_addon = stream_info.get("source") == "addon" or "pencari" in stream_url.lower()
-        addon_timeout = 3.5 if is_addon else 8.0
-        stream_cm = client.stream(
-            "GET",
-            stream_url,
-            headers=remote_headers,
-            timeout=httpx.Timeout(connect=addon_timeout, read=8.0, write=8.0, pool=10.0)
+        connect_timeout = 3.5 if is_addon else 8.0
+        first_read_timeout = 4.5 if is_addon else 10.0
+        stream_cm, resp, chunk_iter, first_chunk = await _open_and_read_first_chunk(
+            stream_url, remote_headers, connect_timeout, first_read_timeout
         )
-        resp = await stream_cm.__aenter__()
-        if resp.status_code not in (200, 206):
-            raise ValueError(f"Upstream returned non-200/206 status: {resp.status_code}")
     except Exception as primary_err:
-        if stream_cm:
-            try: await stream_cm.__aexit__(None, None, None)
-            except Exception: pass
-            stream_cm = None
-            resp = None
-        logger.warning(f"Primary audio stream connection failed for {video_id} ({primary_err}). Falling back immediately to YouTube Native Opus...")
+        stream_cm = None
+        resp = None
+        chunk_iter = None
+        first_chunk = b""
+        logger.warning(f"Primary audio stream failed for {video_id} ({primary_err}). Falling back immediately to YouTube Native Opus...")
         try:
             from backend.api.stream import _STREAM_CACHE
             _STREAM_CACHE.pop(f"{video_id}_{quality}", None)
+            _STREAM_CACHE.pop(f"{video_id}_lossless", None)
         except Exception:
             pass
 
@@ -413,19 +480,10 @@ async def stream_audio_proxy(
             raise HTTPException(status_code=502, detail="Failed to resolve playable audio.")
         stream_url = stream_info["streamUrl"]
         try:
-            stream_cm = client.stream(
-                "GET",
-                stream_url,
-                headers=remote_headers,
-                timeout=httpx.Timeout(connect=8.0, read=10.0, write=10.0, pool=10.0)
+            stream_cm, resp, chunk_iter, first_chunk = await _open_and_read_first_chunk(
+                stream_url, remote_headers, 8.0, 10.0
             )
-            resp = await stream_cm.__aenter__()
-            if resp.status_code not in (200, 206):
-                raise HTTPException(status_code=502, detail=f"Fallback upstream failed: {resp.status_code}")
         except Exception as fallback_err:
-            if stream_cm:
-                try: await stream_cm.__aexit__(None, None, None)
-                except Exception: pass
             logger.error(f"Fallback stream connection also failed for {video_id}: {fallback_err}")
             raise HTTPException(status_code=502, detail="Audio stream unavailable.")
 
@@ -445,7 +503,7 @@ async def stream_audio_proxy(
         "Content-Type": content_type,
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "X-Audio-Codec, X-Audio-Bitrate, X-Audio-Lossless, X-Audio-Source, X-Audio-Sample-Rate, X-Audio-Bit-Depth, X-Audio-Addon-Name",
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": "no-store" if is_recovery else "public, max-age=3600",
         "X-Audio-Codec": str(stream_info.get("codec", "opus")),
         "X-Audio-Bitrate": str(stream_info.get("bitrate", 256)),
         "X-Audio-Lossless": "true" if stream_info.get("isLossless") else "false",
@@ -458,38 +516,134 @@ async def stream_audio_proxy(
         headers["Content-Range"] = resp.headers["Content-Range"]
     # DO NOT set Content-Length on StreamingResponse: avoids Uvicorn "Response content longer than Content-Length" errors
 
-    # In-stream single-connection caching from byte 0 to eliminate duplicate upstream requests
-    is_initial_stream = not range_header or range_header.startswith("bytes=0-")
+    # Determine expected total file size so we NEVER cache truncated partial streams
+    expected_total_bytes = 0
+    if "Content-Range" in resp.headers and "/" in resp.headers["Content-Range"]:
+        try:
+            total_part = resp.headers["Content-Range"].split("/")[-1].strip()
+            if total_part.isdigit():
+                expected_total_bytes = int(total_part)
+        except Exception:
+            expected_total_bytes = 0
+    elif resp.status_code == 200 and "Content-Length" in resp.headers:
+        try:
+            expected_total_bytes = int(resp.headers["Content-Length"])
+        except Exception:
+            expected_total_bytes = 0
+
+    # Only cache full unbounded initial requests (NOT bounded probes like Range: bytes=0-2097151!)
+    norm_range = (range_header or "").strip().lower()
+    is_full_initial_stream = (not norm_range) or (norm_range == "bytes=0-")
     safe_id = "".join(c for c in video_id if c.isalnum() or c in ("-", "_"))
-    bg_part = audio_cache.cache_dir / f"{safe_id}.cache.part"
+    bg_part = audio_cache.cache_dir / f"{safe_id}.{uuid.uuid4().hex[:8]}.cache.part"
     cache_f = None
-    if is_initial_stream and not audio_cache.is_cached(video_id):
+    if is_full_initial_stream and not audio_cache.is_cached(video_id):
         try:
             cache_f = open(bg_part, "wb")
         except Exception:
             cache_f = None
 
-    # Optimized non-blocking async chunk stream with graceful client disconnect handling
+    # Non-blocking async chunk stream with transparent byte-range mid-stream reconnect
     async def chunk_generator():
-        nonlocal cache_f
+        nonlocal cache_f, stream_cm, resp, chunk_iter, first_chunk
+        bytes_sent = 0
+        upstream_complete = False
+        client_disconnected = False
+        reconnect_attempts = 0
+        max_reconnects = 2
+
         try:
-            async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
-                if chunk:
-                    if cache_f:
+            # Yield verified first chunk
+            if first_chunk:
+                if cache_f:
+                    try:
+                        cache_f.write(first_chunk)
+                    except Exception:
+                        pass
+                bytes_sent += len(first_chunk)
+                yield first_chunk
+                first_chunk = b""
+
+            while True:
+                try:
+                    async for chunk in chunk_iter:
+                        if await request.is_disconnected():
+                            client_disconnected = True
+                            break
+                        if chunk:
+                            if cache_f:
+                                try:
+                                    cache_f.write(chunk)
+                                except Exception:
+                                    pass
+                            bytes_sent += len(chunk)
+                            yield chunk
+                    if not client_disconnected:
+                        upstream_complete = True
+                    break
+                except (httpx.ReadTimeout, httpx.NetworkError, httpx.RemoteProtocolError, ConnectionError) as net_err:
+                    if await request.is_disconnected():
+                        client_disconnected = True
+                        break
+                    if reconnect_attempts >= max_reconnects or bytes_sent == 0:
+                        logger.warning(f"Audio upstream connection interrupted for {video_id} at {bytes_sent}B: {net_err}")
                         try:
-                            cache_f.write(chunk)
+                            from backend.api.stream import _STREAM_CACHE
+                            _STREAM_CACHE.pop(f"{video_id}_{quality}", None)
                         except Exception:
                             pass
-                    yield chunk
-                if await request.is_disconnected():
-                    break
+                        break
+
+                    reconnect_attempts += 1
+                    resume_offset = base_offset + bytes_sent
+                    logger.info(f"Reconnecting mid-stream for {video_id} at byte {resume_offset} (retry {reconnect_attempts}/{max_reconnects})...")
+                    if stream_cm:
+                        try:
+                            await stream_cm.__aexit__(None, None, None)
+                        except Exception:
+                            pass
+                        stream_cm = None
+
+                    await asyncio.sleep(0.2)
+                    retry_headers = {
+                        "User-Agent": remote_headers["User-Agent"],
+                        "Range": f"bytes={resume_offset}-",
+                    }
+                    try:
+                        stream_cm = client.stream(
+                            "GET",
+                            stream_url,
+                            headers=retry_headers,
+                            timeout=httpx.Timeout(connect=5.0, read=7.0, write=8.0, pool=10.0)
+                        )
+                        resp = await stream_cm.__aenter__()
+                        if resp.status_code != 206:
+                            raise ValueError(f"Mid-stream range reconnect got {resp.status_code} instead of 206")
+                        cr = resp.headers.get("Content-Range", "")
+                        if not cr.startswith(f"bytes {resume_offset}-"):
+                            raise ValueError(f"Content-Range mismatch on reconnect: {cr}")
+                        chunk_iter = resp.aiter_bytes(chunk_size=64 * 1024)
+                    except Exception as rec_err:
+                        logger.warning(f"Mid-stream reconnect failed for {video_id}: {rec_err}")
+                        if stream_cm:
+                            try:
+                                await stream_cm.__aexit__(None, None, None)
+                            except Exception:
+                                pass
+                            stream_cm = None
+                        break
+
+            # Only promote to permanent disk cache if full file finished cleanly without truncation
             if cache_f:
                 try:
+                    cache_f.flush()
                     cache_f.close()
                 except Exception:
                     pass
                 cache_f = None
-                if bg_part.exists() and bg_part.stat().st_size > 32 * 1024:
+                size_ok = bg_part.exists() and bg_part.stat().st_size > 32 * 1024
+                length_ok = (expected_total_bytes == 0) or ((base_offset + bytes_sent) >= expected_total_bytes)
+                if upstream_complete and not client_disconnected and size_ok and length_ok and not audio_cache.is_cached(video_id):
                     meta = {
                         "videoId": video_id,
                         "title": title or stream_info.get("title", ""),
@@ -499,24 +653,30 @@ async def stream_audio_proxy(
                         "bitrate": stream_info.get("bitrate", 256),
                         "isLossless": stream_info.get("isLossless", False),
                         "source": stream_info.get("source", "cache"),
+                        "complete": True,
                     }
                     audio_cache.store_file(video_id, bg_part, meta)
-        except (httpx.ReadTimeout, httpx.NetworkError, httpx.RemoteProtocolError, ConnectionError) as net_err:
-            logger.warning(f"Audio upstream connection interrupted for {video_id}: {net_err}")
-            try:
-                from backend.api.stream import _STREAM_CACHE
-                _STREAM_CACHE.pop(f"{video_id}_{quality}", None)
-            except Exception:
-                pass
+                else:
+                    try:
+                        bg_part.unlink(missing_ok=True)
+                    except Exception:
+                        pass
         except asyncio.CancelledError:
             pass
         except Exception as ex:
             logger.debug(f"Streaming chunk error for {video_id}: {ex}")
         finally:
             if cache_f:
-                try: cache_f.close()
-                except Exception: pass
+                try:
+                    cache_f.close()
+                except Exception:
+                    pass
                 cache_f = None
+            try:
+                if bg_part.exists():
+                    bg_part.unlink(missing_ok=True)
+            except Exception:
+                pass
             if stream_cm:
                 try:
                     await stream_cm.__aexit__(None, None, None)
@@ -546,22 +706,28 @@ async def preload_track_audio(
         return {"status": "already_cached", "videoId": video_id}
 
     def do_preload():
+        safe_id = "".join(c for c in video_id if c.isalnum() or c in ("-", "_"))
+        part_file = audio_cache.cache_dir / f"{safe_id}.{uuid.uuid4().hex[:8]}.preload.part"
         try:
             stream_info = stream_resolver.resolve_audio(video_id, title=title, artist=artist, quality=quality)
             if not stream_info or not stream_info.get("streamUrl"):
                 return
             url = stream_info["streamUrl"]
-            safe_id = "".join(c for c in video_id if c.isalnum() or c in ("-", "_"))
-            part_file = audio_cache.cache_dir / f"{safe_id}.preload.part"
             req_headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
             with requests.get(url, headers=req_headers, stream=True, timeout=12) as r:
                 if r.status_code in (200, 206):
+                    expected_len = int(r.headers.get("Content-Length") or 0)
+                    written = 0
                     with open(part_file, "wb") as f:
                         for chunk in r.iter_content(chunk_size=128 * 1024):
                             if chunk:
                                 f.write(chunk)
+                                written += len(chunk)
+                    if expected_len > 0 and written < expected_len:
+                        logger.debug(f"Preload truncated for {video_id}: {written}/{expected_len}")
+                        return
                     codec = str(stream_info.get("codec", "")).lower()
                     if "flac" in codec:
                         content_type = "audio/flac"
@@ -581,10 +747,17 @@ async def preload_track_audio(
                         "bitrate": stream_info.get("bitrate", 256),
                         "isLossless": stream_info.get("isLossless", False),
                         "source": stream_info.get("source", "preload"),
+                        "complete": True,
                     }
                     audio_cache.store_file(video_id, part_file, meta)
         except Exception as e:
             logger.debug(f"Preload worker error for {video_id}: {e}")
+        finally:
+            try:
+                if part_file.exists():
+                    part_file.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     threading.Thread(target=do_preload, daemon=True).start()
     return {"status": "preloading", "videoId": video_id}
