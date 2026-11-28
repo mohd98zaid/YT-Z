@@ -212,13 +212,40 @@ def main():
         try:
             import webview
             patch_edgechromium_fullscreen()
-            print("[*] Launching native desktop window via pywebview (with true fullscreen support)...")
+
+            # Compute compact, centered window geometry inside usable screen working area
+            screens = getattr(webview, "screens", [])
+            primary = screens[0] if screens else None
+            work_x, work_y, work_w, work_h = 0, 0, 1280, 720
+            if primary is not None:
+                frame = getattr(primary, "frame", None)
+                if frame is not None and getattr(frame, "Width", 0) > 0 and getattr(frame, "Height", 0) > 0:
+                    work_x = int(frame.X)
+                    work_y = int(frame.Y)
+                    work_w = int(frame.Width)
+                    work_h = int(frame.Height)
+                else:
+                    work_x = int(getattr(primary, "x", 0))
+                    work_y = int(getattr(primary, "y", 0))
+                    work_w = int(getattr(primary, "width", 1280))
+                    work_h = max(480, int(getattr(primary, "height", 768)) - 48)
+
+            win_w = max(780, min(960, int(work_w * 0.64)))
+            win_h = max(520, min(620, int(work_h * 0.76)))
+            win_w = min(win_w, max(640, work_w - 60))
+            win_h = min(win_h, max(480, work_h - 48))
+            win_x = work_x + max(0, (work_w - win_w) // 2)
+            win_y = work_y + max(0, (work_h - win_h) // 2)
+
+            print(f"[*] Launching native desktop window ({win_w}x{win_h} at {win_x},{win_y})...")
             window = webview.create_window(
                 title="YT-Z - Ultimate YouTube Music & Downloader",
                 url=APP_URL,
-                width=1280,
-                height=850,
-                min_size=(960, 640),
+                width=win_w,
+                height=win_h,
+                x=win_x,
+                y=win_y,
+                min_size=(min(760, win_w), min(500, win_h)),
                 background_color="#0a0a0c"
             )
             # Ensure persistent storage for localStorage, cookies, session across restarts
